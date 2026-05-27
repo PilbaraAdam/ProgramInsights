@@ -484,21 +484,80 @@ else if (program is not null)
             {
                 <div class="tabcontent" style="display:block;">
                     <div class="fixedTableWidth">
-                        <div class="results-toolbar">
-                            <button type="button" class="button1" @onclick="RunCalculation" disabled="@isCalculating">
-                                <i class="fa-solid fa-calculator"></i> @(isCalculating ? "Calculating..." : "Calculate")
-                            </button>
-                            <button type="button" class="button2" @onclick="DownloadExcel" disabled="@(exportBytes is null)">
-                                <i class="fa-solid fa-file-excel"></i> Export to Excel
-                            </button>
-                        </div>
-                        @if (!string.IsNullOrWhiteSpace(calcError))
+
+                        @if (isCalculating)
                         {
-                            <div class="mapping-error">@calcError</div>
+                            <div class="calc-loading">
+                                <div class="calc-loading-spinner"></div>
+                                <div class="calc-loading-title">Calculating…</div>
+                                <p class="calc-loading-desc">Projecting EFTSL ramp-up, revenue, cost, and margin across all cohorts and years.</p>
+                            </div>
                         }
-                        @if (calculationResult is not null)
+                        else
                         {
-                            <!-- Year summary cards -->
+                            <div class="results-toolbar">
+                                <button type="button" class="@(calculationResult is null || calculationIsStale ? "button1" : "button2")" @onclick="RunCalculation">
+                                    <i class="fa-solid fa-calculator"></i> @(calculationResult is null ? "Run Calculation" : "Recalculate")
+                                </button>
+                                <button type="button" class="button2" @onclick="DownloadExcel" disabled="@(exportBytes is null)">
+                                    <i class="fa-solid fa-file-excel"></i> Export to Excel
+                                </button>
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(calcError))
+                            {
+                                <div class="mapping-error">@calcError</div>
+                            }
+
+                            @if (calculationResult is null)
+                            {
+                                <div class="calc-prereq">
+                                    <div class="calc-prereq-header">
+                                        <i class="fa-solid fa-circle-info calc-prereq-icon"></i>
+                                        <div>
+                                            <div class="calc-prereq-title">Ready to calculate?</div>
+                                            <p class="calc-prereq-subtitle">The calculation projects EFTSL cohort ramp-up and produces year-by-year revenue, cost, and margin figures based on your inputs below.</p>
+                                        </div>
+                                    </div>
+                                    <div class="calc-prereq-checklist">
+                                        <div class="checklist-item @(InputDataReady ? "check-ok" : "check-warn")">
+                                            <i class="@(InputDataReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                            <div>
+                                                <span class="calc-check-label">Input Data</span>
+                                                <span class="calc-check-detail">@(InputDataReady ? "EFTSL values entered" : "No EFTSL values — go to Input Data tab")</span>
+                                            </div>
+                                        </div>
+                                        <div class="checklist-item @(UnitsReady ? "check-ok" : "check-warn")">
+                                            <i class="@(UnitsReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                            <div>
+                                                <span class="calc-check-label">Units</span>
+                                                <span class="calc-check-detail">@(UnitsReady ? $"{program!.Units.Count} unit{(program!.Units.Count == 1 ? "" : "s")} configured" : "No units added — go to Profiles tab")</span>
+                                            </div>
+                                        </div>
+                                        <div class="checklist-item @(CostRevenueReady ? "check-ok" : "check-warn")">
+                                            <i class="@(CostRevenueReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                            <div>
+                                                <span class="calc-check-label">Cost &amp; Revenue</span>
+                                                <span class="calc-check-detail">@(CostRevenueReady ? "CPH and NFC values set" : "Missing CPH or NFC — go to Cost & Revenue tab")</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="button1 calc-prereq-btn" @onclick="RunCalculation">
+                                        <i class="fa-solid fa-calculator"></i> Run Calculation
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                @if (calculationIsStale)
+                                {
+                                    <div class="calc-stale-banner">
+                                        <i class="fa-solid fa-triangle-exclamation"></i>
+                                        <span>Inputs have changed since the last calculation — results below may be out of date.</span>
+                                        <button type="button" class="calc-stale-btn" @onclick="RunCalculation">Recalculate</button>
+                                    </div>
+                                }
+                                <!-- Year summary cards -->
                             <div class="results-cards">
                                 @foreach (var row in calculationResult.CostResults)
                                 {
@@ -667,7 +726,8 @@ else if (program is not null)
                                     }
                                 </div>
                             }
-                        }
+                            }   @* end else (calculationResult is not null) *@
+                        }   @* end else (not calculating) *@
                     </div>
                 </div>
             }
@@ -836,6 +896,7 @@ else if (program is not null)
     private string? calcError;
     private int degreeYearCount = 1;
     private bool isCalculating;
+    private bool calculationIsStale;
     private ProgramCalculationResultDto? calculationResult;
     private byte[]? exportBytes;
     private HashSet<int> expandedYears = new();
@@ -990,7 +1051,7 @@ else if (program is not null)
             builder.AddAttribute(seq++, "type", "number");
             builder.AddAttribute(seq++, "step", "any");
             builder.AddAttribute(seq++, "value", BindConverter.FormatValue(getter(setting)));
-            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<double>(this, value => setter(setting, value), getter(setting)));
+            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<double>(this, value => { setter(setting, value); MarkStale(); }, getter(setting)));
             builder.CloseElement();
             builder.CloseElement();
         }
@@ -1093,6 +1154,12 @@ else if (program is not null)
         }
     }
 
+    private void MarkStale()
+    {
+        if (calculationResult is not null)
+            calculationIsStale = true;
+    }
+
     private async Task RunCalculation()
     {
         if (program is null) return;
@@ -1109,6 +1176,7 @@ else if (program is not null)
 
             calculationResult = CalculationSvc.Calculate(program);
             exportBytes = ExportSvc.GenerateResultsWorkbook(calculationResult, program);
+            calculationIsStale = false;
             statusMessage = "Calculation complete.";
             pendingChartRender = true;
         }
@@ -1169,12 +1237,14 @@ else if (program is not null)
     {
         if (program is null || program.Settings.Count >= 15) return;
         program.Settings.Add(new ProgramYearSettingDto { Year = program.Settings.Count });
+        MarkStale();
     }
 
     private void RemoveProjectionYear()
     {
         if (program is null || program.Settings.Count <= 1) return;
         program.Settings.RemoveAt(program.Settings.Count - 1);
+        MarkStale();
     }
 
     private void AddDegreeYear()
@@ -1309,14 +1379,14 @@ else if (program is not null)
             }
         }
 
-        calculationResult = null;
+        MarkStale();
         CloseUnitPicker();
     }
 
     private void RemoveUnit(ProgramUnitDto unit)
     {
         program?.Units.Remove(unit);
-        calculationResult = null;
+        MarkStale();
     }
 
     private void SelectModelValue(ModelValueSummaryDto value)
@@ -1369,6 +1439,7 @@ else if (program is not null)
             case "Cph": program.CphSelect = value; break;
             case "Nfc": program.NfcSelect = value; break;
         }
+        MarkStale();
     }
 
     private double GetCustomValue(string field) => field switch
@@ -1392,6 +1463,7 @@ else if (program is not null)
             case "Cph": program.CphCustom = value; break;
             case "Nfc": program.NfcCustom = value; break;
         }
+        MarkStale();
     }
 
     private double GetModelValue(string field) => field switch
