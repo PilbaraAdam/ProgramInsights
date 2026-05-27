@@ -1,0 +1,1473 @@
+@page "/program/{ProgramId:guid}"
+@rendermode InteractiveServer
+
+<PageTitle>@(program?.Name ?? "Program") - Program Insights</PageTitle>
+
+@if (isLoading)
+{
+    <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <p>Loading program...</p>
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(loadError))
+{
+    <div class="content-container">
+        <ul class="breadcrumb">
+            <li><a href="/">Home</a></li>
+            <li>Program</li>
+        </ul>
+        <div class="mapping-error">@loadError</div>
+    </div>
+}
+else if (program is not null)
+{
+    <div class="content-container">
+        <ul class="breadcrumb">
+            <li><a href="/">Home</a></li>
+            <li><a href="/">@program.ScenarioName</a></li>
+            <li>@program.Name</li>
+        </ul>
+        @if (!string.IsNullOrWhiteSpace(statusMessage))
+        {
+            <span class="message-label">@statusMessage</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(saveError))
+        {
+            <div class="mapping-error">@saveError</div>
+        }
+    </div>
+
+    <div class="tabOuterContainer">
+        <div class="tabContainer">
+            <div class="tab">
+                <div class="tab-content">
+                    <div class="programDetails">
+                        <button type="button" class="button2" @onclick="MoveToNextTab">
+                            Next <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+
+                    <div class="tabLeftSize">
+                        @foreach (var tab in tabs)
+                        {
+                            <button type="button" class="tablinks @(activeTab == tab ? "active" : "")"
+                                    @onclick="() => SetActiveTab(tab)">
+                                <i class="@TabIcon(tab)"></i> @TabLabel(tab)
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (activeTab == "Details")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="meta-strip">
+                        <div class="meta-item">
+                            <span class="meta-label">Scenario</span>
+                            <span class="meta-text">@program.ScenarioName</span>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(program.InsightsModel))
+                        {
+                            <div class="meta-item">
+                                <span class="meta-label">Insights Model</span>
+                                <span class="meta-text">@program.InsightsModel</span>
+                            </div>
+                        }
+                        <div class="meta-item">
+                            <span class="meta-label">Start Year</span>
+                            <span class="meta-text">@program.StartYear</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Last Saved</span>
+                            <span class="meta-text">@FormatDate(program.SaveDate)</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Model Data Updated</span>
+                            <span class="meta-text">@FormatDate(program.ScenarioSaveDate)</span>
+                        </div>
+                    </div>
+
+                    <div class="details-layout">
+                        <div class="details-form-col">
+                            <div class="form-section">
+                                <div class="aboutRow">
+                                    <div class="leftColumn">Program Name</div>
+                                    <div class="rightColumn">
+                                        <input type="text" class="textBoxStyle4" @bind="program.Name" maxlength="36" />
+                                    </div>
+                                </div>
+                                <div class="aboutRow">
+                                    <div class="leftColumn">Description</div>
+                                    <div class="rightColumn">
+                                        <textarea class="textBoxStyle3" @bind="program.Description" maxlength="250"></textarea>
+                                    </div>
+                                </div>
+                                <div class="aboutRow">
+                                    <div class="leftColumn">Start Year</div>
+                                    <div class="rightColumn">
+                                        <input type="number" class="textBoxStyle4" @bind="program.StartYear" />
+                                    </div>
+                                </div>
+                                @if (program.Profiles.Count > 0)
+                                {
+                                    <div class="aboutRow">
+                                        <div class="leftColumn">Default Profile</div>
+                                        <div class="rightColumn">
+                                            <select class="dropDownList1" @bind="program.Profile">
+                                                @foreach (var p in program.Profiles)
+                                                {
+                                                    <option value="@p.Name">@p.Name</option>
+                                                }
+                                            </select>
+                                        </div>
+                                    </div>
+                                }
+                                <div class="aboutRow">
+                                    <div class="leftColumn">Projection Years</div>
+                                    <div class="rightColumn">
+                                        <span class="meta-text">@program.Settings.Count year@(program.Settings.Count == 1 ? "" : "s") (@program.StartYear – @(program.StartYear + program.Settings.Count - 1))</span>
+                                    </div>
+                                </div>
+
+                                <div class="tab-footer-actions">
+                                    <button type="button" class="button2" @onclick="MoveToNextTab">
+                                        Next: Input Data <i class="fa-solid fa-chevron-right"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="details-sidebar-col">
+
+                            <!-- Scenario info card -->
+                            <div class="details-checklist details-scenario-info">
+                                <div class="details-checklist-title">Scenario</div>
+                                <div class="quickstat-row">
+                                    <span class="quickstat-label">Name</span>
+                                    <span class="quickstat-value">@program.ScenarioName</span>
+                                </div>
+                                <div class="quickstat-row">
+                                    <span class="quickstat-label">Source</span>
+                                    <span class="quickstat-value">
+                                        @if (!string.IsNullOrWhiteSpace(program.SourceDb))
+                                        {
+                                            <span class="scenario-sf-badge">
+                                                <i class="fa-solid fa-database"></i> @program.SourceDb
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="source-manual-tag">
+                                                <i class="fa-solid fa-file-pen"></i> Manual
+                                            </span>
+                                        }
+                                    </span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(program.InsightsModel))
+                                {
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Model</span>
+                                        <span class="quickstat-value" style="font-size:12px;">@program.InsightsModel</span>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(program.SourceDb))
+                                {
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Courses</span>
+                                        <span class="quickstat-value">@program.ModelValues.Select(v => v.CourseName).Distinct().Count()</span>
+                                    </div>
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Units</span>
+                                        <span class="quickstat-value">@program.UnitOptions.Count</span>
+                                    </div>
+                                    var schoolCount = Schools.Count();
+                                    if (schoolCount > 0)
+                                    {
+                                        <div class="quickstat-row">
+                                            <span class="quickstat-label">Schools</span>
+                                            <span class="quickstat-value">@schoolCount school@(schoolCount == 1 ? "" : "s")</span>
+                                        </div>
+                                    }
+                                    <div style="margin-top:10px;">
+                                        <a href="/scenario/@program.ScenarioId/mapping?db=@Uri.EscapeDataString(program.SourceDb)"
+                                           class="button2 mapping-link-btn">
+                                            <i class="fa-solid fa-diagram-project"></i> Edit Data Mapping
+                                        </a>
+                                    </div>
+                                }
+                                @if (program.ScenarioSaveDate.HasValue)
+                                {
+                                    <div class="quickstat-row" style="margin-top:8px;">
+                                        <span class="quickstat-label">Data Updated</span>
+                                        <span class="quickstat-value" style="font-size:11px;color:#94a3b8;">@FormatDate(program.ScenarioSaveDate)</span>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- Setup status card -->
+                            <div class="details-checklist">
+                                <div class="details-checklist-title">Setup Status</div>
+                                <div class="checklist-item @(InputDataReady ? "check-ok" : "check-warn")">
+                                    <i class="@(InputDataReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                    <span>Input Data — @(InputDataReady ? "EFTSL values entered" : "No EFTSL entered")</span>
+                                </div>
+                                <div class="checklist-item @(UnitsReady ? "check-ok" : "check-warn")">
+                                    <i class="@(UnitsReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                    <span>Units — @(UnitsReady ? $"{program.Units.Count} unit{(program.Units.Count == 1 ? "" : "s")} configured" : "No units added")</span>
+                                </div>
+                                <div class="checklist-item @(CostRevenueReady ? "check-ok" : "check-warn")">
+                                    <i class="@(CostRevenueReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                    <span>Cost & Revenue — @(CostRevenueReady ? "Values set" : "Missing CPH or NFC")</span>
+                                </div>
+                                <div class="checklist-item @(calculationResult is not null ? "check-ok" : "check-pending")">
+                                    <i class="@(calculationResult is not null ? "fa-solid fa-circle-check" : "fa-regular fa-circle")"></i>
+                                    <span>Calculated — @(calculationResult is not null ? "Results available" : "Not yet run")</span>
+                                </div>
+                            </div>
+
+                            @if (calculationResult is not null)
+                            {
+                                <div class="details-checklist details-quickstats">
+                                    <div class="details-checklist-title">Last Calculation</div>
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Peak EFTSL</span>
+                                        <span class="quickstat-value">@FormatNumber(PeakEftsl)</span>
+                                    </div>
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Peak Year</span>
+                                        <span class="quickstat-value">@PeakCalendarYear</span>
+                                    </div>
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Total Revenue</span>
+                                        <span class="quickstat-value">@FormatCurrency(TotalRevenue)</span>
+                                    </div>
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Avg Total Margin</span>
+                                        <span class="quickstat-value">@FormatPercent(AvgMarginPercent)</span>
+                                    </div>
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Projection Years</span>
+                                        <span class="quickstat-value">@calculationResult.CostResults.Count</span>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "InputData")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="tab-section-header">
+                        <h3 class="tab-section-title">Enrolment &amp; Cost Projections</h3>
+                        <p class="tab-section-desc">Enter values for each projection year. Rows are grouped by enrolment, fixed cost, and CPI.</p>
+                    </div>
+                    <div class="input-data-scroll-wrapper">
+                        <table class="input-data-table">
+                            <thead>
+                                <tr>
+                                    <th>Year</th>
+                                    @foreach (var setting in program.Settings)
+                                    {
+                                        <th>@(program.StartYear + setting.Year)</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @InputRow("CGS EFTSL", "enrolment-row", setting => setting.CgsEftsl, (setting, value) => setting.CgsEftsl = value)
+                                @InputRow("Domestic EFTSL", "enrolment-row", setting => setting.DomesticEftsl, (setting, value) => setting.DomesticEftsl = value)
+                                @InputRow("International EFTSL", "enrolment-row", setting => setting.InternationalEftsl, (setting, value) => setting.InternationalEftsl = value)
+                                @InputRow("Fixed Costs ($)", "cost-row group-start", setting => setting.FixedExpense, (setting, value) => setting.FixedExpense = value)
+                                @InputRow("Revenue CPI (%)", "cpi-row group-start", setting => setting.RevenueCpi, (setting, value) => setting.RevenueCpi = value)
+                                @InputRow("Expense CPI (%)", "cpi-row", setting => setting.ExpenseCpi, (setting, value) => setting.ExpenseCpi = value)
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="tab-footer-actions" style="margin-top:16px;">
+                        <button type="button" class="button2" @onclick="AddProjectionYear">+ Add Year</button>
+                        <button type="button" class="button2" @onclick="RemoveProjectionYear" disabled="@(program.Settings.Count <= 1)">- Remove Year</button>
+                        <span style="flex:1;"></span>
+                        <button type="button" class="button2" @onclick="MoveToNextTab">
+                            Next: Profiles <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Profiles")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="instructions">
+                            <p>Assign units and profiles for each year of the degree.</p>
+                        </div>
+
+                        <div id="degreeYearsContainer">
+                            @for (var year = 1; year <= DegreeYearCount; year++)
+                            {
+                                var capturedYear = year;
+                                var unitsForYear = program.Units.Where(u => u.ProgramYear == capturedYear).ToList();
+                                <div class="degree-year-section">
+                                    <div class="degree-year-header">
+                                        <span class="dy-header-left">
+                                            <i class="fa-solid fa-calendar-days"></i>
+                                            <span class="dy-year-label">Year @capturedYear</span>
+                                            <span class="dy-unit-count">@unitsForYear.Count @(unitsForYear.Count == 1 ? "unit" : "units")</span>
+                                        </span>
+                                    </div>
+                                    <div class="degree-year-body">
+                                        <table class="profiles-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Unit</th>
+                                                    <th>Profile</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @if (unitsForYear.Count == 0)
+                                                {
+                                                    <tr class="no-units-row">
+                                                        <td colspan="3" class="no-units-msg">No units yet.</td>
+                                                    </tr>
+                                                }
+                                                @foreach (var unit in unitsForYear)
+                                                {
+                                                    <tr>
+                                                        <td class="unit-name-cell">
+                                                            @if (!program.UnitOptions.Any(o => o.Name == unit.Unit))
+                                                            {
+                                                                <span class="new-unit-pill">New</span>
+                                                            }
+                                                            @unit.Unit
+                                                        </td>
+                                                        <td class="profile-name-cell">
+                                                            @unit.Profile
+                                                        </td>
+                                                        <td class="action-cell">
+                                                            <button type="button" class="row-action-btn"
+                                                                    title="Edit" @onclick="() => OpenUnitPicker(capturedYear, unit)">
+                                                                <i class="fa-solid fa-pen"></i>
+                                                            </button>
+                                                            <button type="button" class="row-action-btn row-action-remove"
+                                                                    title="Remove" @onclick="() => RemoveUnit(unit)">
+                                                                <i class="fa-solid fa-trash"></i>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                        <div class="dy-footer">
+                                            <button type="button" class="button4" @onclick="() => OpenUnitPicker(capturedYear)">
+                                                <i class="fa-solid fa-plus"></i> Add Unit
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="tab-footer-actions" style="margin-top:16px;">
+                            <button type="button" class="button2" @onclick="AddDegreeYear">
+                                <i class="fa-solid fa-plus"></i> Add Degree Year
+                            </button>
+                            <button type="button" class="button2" @onclick="RemoveDegreeYear" disabled="@(DegreeYearCount <= 1)">
+                                <i class="fa-solid fa-trash"></i> Remove Last Year
+                            </button>
+                            <span style="flex:1;"></span>
+                            <button type="button" class="button2" @onclick="MoveToNextTab">
+                                Next: Cost & Revenue <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "CostRevenue")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="cr-layout @(HasSnowflakeSource ? "" : "cr-layout-manual")">
+
+                            @* Left: model reference table — Snowflake scenarios only *@
+                            @if (HasSnowflakeSource)
+                            {
+                                <div class="cr-model-panel">
+                                    <p class="cr-panel-title">Model Reference Data</p>
+                                    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                                        <select class="dropDownList1" @bind="program.SchoolSelect">
+                                            <option value="">All Schools</option>
+                                            @foreach (var school in Schools)
+                                            {
+                                                <option value="@school">@school</option>
+                                            }
+                                        </select>
+                                        <select class="dropDownList1" @bind="program.CourseSelect">
+                                            <option value="">All Courses</option>
+                                            @foreach (var course in Courses)
+                                            {
+                                                <option value="@course">@course</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <table class="tableStyle2 cr-model-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Career</th>
+                                                <th>CPH</th>
+                                                <th>NFC / EFTSL</th>
+                                                <th>Rev Dom</th>
+                                                <th>Rev Int</th>
+                                                <th>Rev CGS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @if (!ModelValueSummaries.Any())
+                                            {
+                                                <tr><td colspan="6" style="color:#94a3b8;font-size:12px;text-align:center;padding:16px;">No model data available.</td></tr>
+                                            }
+                                            @foreach (var value in ModelValueSummaries)
+                                            {
+                                                <tr class="selectable-row @(program.CareerSelect == value.Career ? "scenario-selected" : "")"
+                                                    @onclick="() => SelectModelValue(value)">
+                                                    <td><span class="custom-link">@value.Career</span></td>
+                                                    <td>@FormatNumber(value.CostPerHour)</td>
+                                                    <td>@FormatNumber(value.NonCostPerEftsl)</td>
+                                                    <td>@FormatNumber(value.RevDomPerEftsl)</td>
+                                                    <td>@FormatNumber(value.RevIntPerEftsl)</td>
+                                                    <td>@FormatNumber(value.RevCgsPerEftsl)</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+
+                            <!-- Editor cards -->
+                            <div class="cr-editor-panel">
+
+                                <div class="cr-section">
+                                    <div class="cr-section-header">
+                                        <i class="fa-solid fa-arrow-trend-up"></i> Revenue
+                                    </div>
+                                    @CrEditorCard("CGS Revenue / EFTSL", "RevCgs")
+                                    @CrEditorCard("Domestic Revenue / EFTSL", "RevDom")
+                                    @CrEditorCard("International Revenue / EFTSL", "RevInt")
+                                </div>
+
+                                <div class="cr-section">
+                                    <div class="cr-section-header">
+                                        <i class="fa-solid fa-arrow-trend-down"></i> Cost
+                                    </div>
+                                    @CrEditorCard("Faculty Cost / Hour", "Cph")
+                                    @CrEditorCard("Non-Faculty Cost / EFTSL", "Nfc")
+                                </div>
+
+                            </div>
+                        </div>
+
+                        <div class="tab-footer-actions" style="margin-top:20px;">
+                            <button type="button" class="button2" @onclick="MoveToNextTab">
+                                Next: Calculate <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Results")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="results-toolbar">
+                            <button type="button" class="button1" @onclick="RunCalculation" disabled="@isCalculating">
+                                <i class="fa-solid fa-calculator"></i> @(isCalculating ? "Calculating..." : "Calculate")
+                            </button>
+                            <button type="button" class="button2" @onclick="DownloadExcel" disabled="@(exportBytes is null)">
+                                <i class="fa-solid fa-file-excel"></i> Export to Excel
+                            </button>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(calcError))
+                        {
+                            <div class="mapping-error">@calcError</div>
+                        }
+                        @if (calculationResult is not null)
+                        {
+                            <!-- Year summary cards -->
+                            <div class="results-cards">
+                                @foreach (var row in calculationResult.CostResults)
+                                {
+                                    <div class="result-card">
+                                        <div class="result-card-year">@row.CalendarYear</div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Total EFTSL</span>
+                                            <span class="result-card-value">@FormatNumber(row.TotalEftsl)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Teaching Hours</span>
+                                            <span class="result-card-value">@FormatNumber(row.TotalTeachingHours)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Revenue</span>
+                                            <span class="result-card-value">@FormatCurrency(row.FacultyRevenue)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Total Cost</span>
+                                            <span class="result-card-value">@FormatCurrency(row.FacultyCost + row.NonFacultyCost)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Margin</span>
+                                            <span class="result-card-value @(row.TotalMargin >= 0 ? "positive" : "negative")">@FormatCurrency(row.TotalMargin)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Margin %</span>
+                                            <span class="result-card-value @(row.TotalMarginPercent >= 0 ? "positive" : "negative")">@FormatPercent(row.TotalMarginPercent)</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- Charts -->
+                            <div class="charts-row">
+                                <div class="chart-card">
+                                    <div class="chart-card-title">Revenue vs Cost</div>
+                                    <div class="chart-canvas-wrap">
+                                        <canvas id="costRevenueChart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="chart-card">
+                                    <div class="chart-card-title">EFTSL Ramp-up by Cohort</div>
+                                    <div class="chart-canvas-wrap">
+                                        <canvas id="eftslRampupChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- EFTSL ramp-up triangle table -->
+                            <h3 class="grid-header">EFTSL by Forecast Year and Cohort</h3>
+                            <div style="overflow-x:auto;margin-bottom:28px;">
+                                <table class="rampup-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Forecast Year</th>
+                                            @foreach (var ci in RampCohorts)
+                                            {
+                                                <th>Intake @(program!.StartYear + ci)</th>
+                                            }
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var costRow in calculationResult.CostResults)
+                                        {
+                                            <tr>
+                                                <td><strong>@costRow.CalendarYear</strong></td>
+                                                @foreach (var ci in RampCohorts)
+                                                {
+                                                    var eftsl = calculationResult.HourResults
+                                                        .Where(h => h.ForecastYearIndex == costRow.YearIndex && h.CohortStartYearIndex == ci)
+                                                        .Sum(h => h.DomesticEftsl + h.InternationalEftsl + h.CgsEftsl);
+                                                    var sy = costRow.YearIndex - ci + 1;
+                                                    <td>
+                                                        @if (eftsl > 0)
+                                                        {
+                                                            <span>@FormatNumber(eftsl) <span style="font-size:11px;color:#94a3b8;">(Yr@sy)</span></span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="rampup-empty">—</span>
+                                                        }
+                                                    </td>
+                                                }
+                                                <td class="rampup-total">@FormatNumber(costRow.TotalEftsl)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Collapsible cohort detail -->
+                            <h3 class="grid-header">Unit Detail</h3>
+                            @foreach (var forecastGroup in calculationResult.HourResults.GroupBy(h => h.ForecastYearIndex).OrderBy(g => g.Key))
+                            {
+                                var fyi = forecastGroup.Key;
+                                var costRow2 = calculationResult.CostResults.FirstOrDefault(c => c.YearIndex == fyi);
+                                var isOpen = expandedYears.Contains(fyi);
+                                <div class="detail-section">
+                                    <button type="button" class="detail-section-toggle @(isOpen ? "open" : "")"
+                                            @onclick="() => ToggleYear(fyi)">
+                                        <i class="fa-solid fa-chevron-right toggle-icon"></i>
+                                        <span>@(program!.StartYear + fyi)</span>
+                                        <span style="font-weight:400;color:#64748b;font-size:13px;">
+                                            &mdash; @FormatNumber(costRow2?.TotalEftsl ?? 0) EFTSL &nbsp;·&nbsp;
+                                            @FormatCurrency(costRow2?.FacultyRevenue ?? 0) revenue &nbsp;·&nbsp;
+                                            @FormatCurrency(costRow2?.TotalMargin ?? 0) margin
+                                        </span>
+                                    </button>
+                                    @if (isOpen)
+                                    {
+                                        <div class="detail-section-body">
+                                            @foreach (var cohortGroup in forecastGroup.GroupBy(h => h.CohortStartYearIndex).OrderBy(g => g.Key))
+                                            {
+                                                var studyYear = cohortGroup.First().StudyYear;
+                                                var cohortEftsl = cohortGroup.Sum(h => h.DomesticEftsl + h.InternationalEftsl + h.CgsEftsl);
+                                                <div class="cohort-group-header">
+                                                    Intake @(program!.StartYear + cohortGroup.Key) &mdash; Study Year @studyYear &mdash; @FormatNumber(cohortEftsl) EFTSL
+                                                </div>
+                                                <table class="tableStyleResults textAlignRight">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Unit</th>
+                                                            <th>Profile</th>
+                                                            <th>Dom EFTSL</th>
+                                                            <th>Int EFTSL</th>
+                                                            <th>CGS EFTSL</th>
+                                                            <th>Students / Unit</th>
+                                                            <th>New Unit Hours</th>
+                                                            <th>Student Hours</th>
+                                                            <th>Total Hours</th>
+                                                            <th>Revenue</th>
+                                                            <th>Faculty Cost</th>
+                                                            <th>Non-Fac Cost</th>
+                                                            <th>Total Cost</th>
+                                                            <th>Margin</th>
+                                                            <th>Margin %</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        @foreach (var hour in cohortGroup)
+                                                        {
+                                                            <tr>
+                                                                <td class="textAlignLeft">@hour.Unit</td>
+                                                                <td class="textAlignLeft">@hour.Profile</td>
+                                                                <td>@FormatNumber(hour.DomesticEftsl)</td>
+                                                                <td>@FormatNumber(hour.InternationalEftsl)</td>
+                                                                <td>@FormatNumber(hour.CgsEftsl)</td>
+                                                                <td>@FormatNumber(hour.StudentsPerUnit)</td>
+                                                                <td>@FormatNumber(hour.NewUnitHours)</td>
+                                                                <td>@FormatNumber(hour.StudentHours)</td>
+                                                                <td>@FormatNumber(hour.TotalHours)</td>
+                                                                <td>@FormatCurrency(hour.FacultyRevenue)</td>
+                                                                <td>@FormatCurrency(hour.FacultyCost)</td>
+                                                                <td>@FormatCurrency(hour.NonFacultyCost)</td>
+                                                                <td>@FormatCurrency(hour.TotalCost)</td>
+                                                                <td class="@(hour.Margin >= 0 ? "positive" : "negative")">@FormatCurrency(hour.Margin)</td>
+                                                                <td class="@(hour.MarginPercent >= 0 ? "positive" : "negative")">@FormatPercent(hour.MarginPercent)</td>
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "BreakEven")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Breakeven</h3>
+                            <p class="tab-section-desc">Breakeven tables and charts will move over with the calculation service.</p>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Compare")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Compare</h3>
+                            <p class="tab-section-desc">Program comparison will be wired after calculation results are available in Blazor state.</p>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (isUnitPickerOpen)
+    {
+        <div class="unit-picker-overlay" @onclick="UnitPickerOverlayClick">
+            <div class="unit-picker-modal" @onclick:stopPropagation="true">
+                <div class="unit-picker-header">
+                    <h3 class="unit-picker-title">@(editingUnit is null ? "Select Unit" : "Edit Unit")</h3>
+                    <button type="button" class="row-action-btn" @onclick="CloseUnitPicker" title="Close">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="unit-picker-filters">
+                    <input type="text" class="search-input unit-picker-search-input" placeholder="Search by unit code or name..."
+                           @bind="unitSearch" @bind:event="oninput" />
+                    <select class="dropDownList1 unit-picker-school-filter" @bind="unitSchoolFilter">
+                        <option value="">All Schools</option>
+                        @foreach (var school in Schools)
+                        {
+                            <option value="@school">@school</option>
+                        }
+                    </select>
+                </div>
+                <div class="unit-picker-list @(unitPickerError ? "picker-list-error" : "")">
+                    <div class="unit-picker-item @(selectedPickerUnit == "New Unit" ? "selected" : "")"
+                         @onclick='() => SelectPickerUnit("New Unit")'>
+                        <span class="unit-picker-name"><span class="new-unit-pill">New</span> New Unit</span>
+                    </div>
+                    @foreach (var option in UnitPickerOptions)
+                    {
+                        <div class="unit-picker-item @(selectedPickerUnit == option.Name ? "selected" : "")"
+                             @onclick="() => SelectPickerUnit(option.Name)">
+                            <span class="unit-picker-name">@option.Name</span>
+                            @if (!string.IsNullOrWhiteSpace(option.School))
+                            {
+                                <span class="unit-school-badge">@option.School</span>
+                            }
+                        </div>
+                    }
+                    @if (!UnitPickerOptions.Any())
+                    {
+                        <div class="unit-picker-empty">No units match your search.</div>
+                    }
+                </div>
+                @if (selectedPickerUnit == "New Unit")
+                {
+                    <div class="unit-picker-name-row">
+                        <label class="meta-label" style="display:block;margin-bottom:6px;">Unit Name</label>
+                        <input type="text" class="textBoxStyle4 new-unit-name-input"
+                               placeholder="Enter unit code or name..."
+                               maxlength="100"
+                               @bind="newUnitCustomName" @bind:event="oninput" />
+                        <span class="wizard-hint">Leave blank to save as an unnamed new unit.</span>
+                    </div>
+                }
+                <div class="unit-picker-profile-row">
+                    <label class="meta-label" style="display:block;margin-bottom:6px;">Profile</label>
+                    <select class="dropDownList1" style="width:100%;" @bind="selectedPickerProfile">
+                        @foreach (var profile in program.Profiles)
+                        {
+                            <option value="@profile.Name">@profile.Name</option>
+                        }
+                        <option value="Custom">Custom Profile</option>
+                    </select>
+                    @if (selectedPickerProfile == "Custom")
+                    {
+                        <div class="profile-preview">
+                            <div class="custom-profile-grid">
+                                <div class="custom-profile-field">
+                                    <span class="profile-preview-label">Tut Size</span>
+                                    <input type="number" step="any" class="textBoxStyle4"
+                                           @bind="customTutSize" @bind:event="oninput" />
+                                </div>
+                                <div class="custom-profile-field">
+                                    <span class="profile-preview-label">Lect Hours</span>
+                                    <input type="number" step="any" class="textBoxStyle4"
+                                           @bind="customLectHours" @bind:event="oninput" />
+                                </div>
+                                <div class="custom-profile-field">
+                                    <span class="profile-preview-label">Tut Hours</span>
+                                    <input type="number" step="any" class="textBoxStyle4"
+                                           @bind="customTutHours" @bind:event="oninput" />
+                                </div>
+                                <div class="custom-profile-field">
+                                    <span class="profile-preview-label">Prep Hours</span>
+                                    <input type="number" step="any" class="textBoxStyle4"
+                                           @bind="customPrepHours" @bind:event="oninput" />
+                                </div>
+                                <div class="custom-profile-field">
+                                    <span class="profile-preview-label">Admin Hours</span>
+                                    <input type="number" step="any" class="textBoxStyle4"
+                                           @bind="customAdminHours" @bind:event="oninput" />
+                                </div>
+                                <div class="custom-profile-field">
+                                    <span class="profile-preview-label">Student Hours</span>
+                                    <input type="number" step="any" class="textBoxStyle4"
+                                           @bind="customStudentHours" @bind:event="oninput" />
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    else if (SelectedPickerProfile is not null)
+                    {
+                        <div class="profile-preview">
+                            <div class="profile-preview-grid">
+                                <div class="profile-preview-item"><span class="profile-preview-label">Tut Size</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.TutSize)</span></div>
+                                <div class="profile-preview-item"><span class="profile-preview-label">Lect Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.LectureHours)</span></div>
+                                <div class="profile-preview-item"><span class="profile-preview-label">Tut Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.TutorialHours)</span></div>
+                                <div class="profile-preview-item"><span class="profile-preview-label">Prep Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.PreparationHours)</span></div>
+                                <div class="profile-preview-item"><span class="profile-preview-label">Admin Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.AdministrationHours)</span></div>
+                                <div class="profile-preview-item"><span class="profile-preview-label">Student Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.StudentHours)</span></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="unit-picker-footer">
+                    <button type="button" class="button2" @onclick="CloseUnitPicker">Cancel</button>
+                    <button type="button" class="button1" @onclick="ConfirmUnitPicker">@(editingUnit is null ? "Add Unit" : "Update Unit")</button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid ProgramId { get; set; }
+    [Inject] private ProgramService ProgramSvc { get; set; } = default!;
+    [Inject] private ProgramCalculationService CalculationSvc { get; set; } = default!;
+    [Inject] private ExcelExportService ExportSvc { get; set; } = default!;
+
+    private readonly string[] tabs = ["Details", "InputData", "Profiles", "CostRevenue", "Results", "BreakEven", "Compare"];
+    private ProgramDetailsDto? program;
+    private string activeTab = "Details";
+    private bool isLoading = true;
+    private string? loadError;
+    private string? saveError;
+    private string? statusMessage;
+    private string? calcError;
+    private int degreeYearCount = 1;
+    private bool isCalculating;
+    private ProgramCalculationResultDto? calculationResult;
+    private byte[]? exportBytes;
+    private HashSet<int> expandedYears = new();
+    private bool pendingChartRender;
+
+    private bool isUnitPickerOpen;
+    private bool unitPickerError;
+    private int unitPickerYear = 1;
+    private ProgramUnitDto? editingUnit;
+    private string selectedPickerUnit = "";
+    private string selectedPickerProfile = "";
+    private string newUnitCustomName = "";
+    private double customTutSize;
+    private double customLectHours;
+    private double customTutHours;
+    private double customPrepHours;
+    private double customAdminHours;
+    private double customStudentHours;
+    private string unitSearch = "";
+    private string unitSchoolFilter = "";
+
+    private int DegreeYearCount => Math.Max(degreeYearCount, Math.Max(1, program?.Units.Select(u => u.ProgramYear).DefaultIfEmpty(1).Max() ?? 1));
+
+    private IEnumerable<string> Schools =>
+        program?.ModelValues.Select(v => v.School).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s)
+        ?? Enumerable.Empty<string>();
+
+    private IEnumerable<string> Courses =>
+        program?.ModelValues
+            .Where(v => string.IsNullOrWhiteSpace(program.SchoolSelect) || v.School == program.SchoolSelect)
+            .Select(v => v.CourseName)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct()
+            .OrderBy(c => c)
+        ?? Enumerable.Empty<string>();
+
+    private IEnumerable<ProgramUnitOptionDto> FilteredUnitOptions =>
+        program?.UnitOptions
+            .Where(u => string.IsNullOrWhiteSpace(program.SchoolSelect) || u.School == program.SchoolSelect)
+            .OrderBy(u => u.Name)
+        ?? Enumerable.Empty<ProgramUnitOptionDto>();
+
+    private IEnumerable<ProgramUnitOptionDto> UnitPickerOptions =>
+        program?.UnitOptions
+            .Where(u => string.IsNullOrWhiteSpace(unitSchoolFilter) || u.School == unitSchoolFilter)
+            .Where(u => string.IsNullOrWhiteSpace(unitSearch) || u.Name.Contains(unitSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(u => u.Name)
+        ?? Enumerable.Empty<ProgramUnitOptionDto>();
+
+    private ProgramProfileDto? SelectedPickerProfile =>
+        selectedPickerProfile == "Custom"
+            ? new ProgramProfileDto
+            {
+                Name = "Custom",
+                TutSize = customTutSize,
+                LectureHours = customLectHours,
+                TutorialHours = customTutHours,
+                PreparationHours = customPrepHours,
+                AdministrationHours = customAdminHours,
+                StudentHours = customStudentHours
+            }
+            : program?.Profiles.FirstOrDefault(p => p.Name == selectedPickerProfile);
+
+    private List<ModelValueSummaryDto> ModelValueSummaries =>
+        program?.ModelValues
+            .Where(v => string.IsNullOrWhiteSpace(program.SchoolSelect) || v.School == program.SchoolSelect)
+            .Where(v => string.IsNullOrWhiteSpace(program.CourseSelect) || v.CourseName == program.CourseSelect)
+            .GroupBy(v => new { v.School, v.Career })
+            .Select(g =>
+            {
+                var facultyExpense = g.Sum(x => x.FacultyExpense);
+                var nonFacultyExpense = g.Sum(x => x.NonFacultyExpense);
+                var domEftsl = g.Sum(x => x.DomesticEftsl);
+                var intEftsl = g.Sum(x => x.InternationalEftsl);
+                var cgsEftsl = g.Sum(x => x.CgsEftsl);
+                var totalEftsl = domEftsl + intEftsl + cgsEftsl;
+                var deliveryHours = g.Sum(x => x.DeliveryHours);
+                return new ModelValueSummaryDto
+                {
+                    School = g.Key.School,
+                    Career = g.Key.Career,
+                    CostPerHour = deliveryHours == 0 ? 0 : facultyExpense / deliveryHours,
+                    NonCostPerEftsl = totalEftsl == 0 ? 0 : nonFacultyExpense / totalEftsl,
+                    RevCgsPerEftsl = cgsEftsl == 0 ? 0 : g.Sum(x => x.CgsRevenue) / cgsEftsl,
+                    RevDomPerEftsl = domEftsl == 0 ? 0 : g.Sum(x => x.DomesticRevenue) / domEftsl,
+                    RevIntPerEftsl = intEftsl == 0 ? 0 : g.Sum(x => x.InternationalRevenue) / intEftsl,
+                    DeliveryHours = deliveryHours,
+                    DomesticEftsl = domEftsl,
+                    InternationalEftsl = intEftsl
+                };
+            })
+            .OrderBy(v => v.Career)
+            .ToList()
+        ?? new List<ModelValueSummaryDto>();
+
+    private ModelValueSummaryDto? SelectedModelValue =>
+        ModelValueSummaries.FirstOrDefault(v => v.Career == program?.CareerSelect);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            program = await ProgramSvc.GetDetailsAsync(ProgramId);
+            if (program is null)
+            {
+                loadError = ProgramSvc.IsConfigured
+                    ? "Program not found."
+                    : "Snowflake connection not configured.";
+                return;
+            }
+
+            degreeYearCount = Math.Max(1, program.Units.Select(u => u.ProgramYear).DefaultIfEmpty(1).Max());
+            if (program.Settings.Count == 0)
+            {
+                program.Settings.Add(new ProgramYearSettingDto { Year = 0 });
+            }
+            if (string.IsNullOrWhiteSpace(program.Profile) && program.Profiles.Count > 0)
+            {
+                program.Profile = program.Profiles[0].Name;
+            }
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Failed to load program: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private RenderFragment InputRow(
+        string label,
+        string rowClass,
+        Func<ProgramYearSettingDto, double> getter,
+        Action<ProgramYearSettingDto, double> setter) => builder =>
+    {
+        if (program is null) return;
+        var seq = 0;
+        builder.OpenElement(seq++, "tr");
+        builder.AddAttribute(seq++, "class", $"input-row {rowClass}");
+        builder.OpenElement(seq++, "td");
+        builder.AddAttribute(seq++, "class", "irow-label");
+        builder.AddContent(seq++, label);
+        builder.CloseElement();
+        foreach (var setting in program.Settings)
+        {
+            builder.OpenElement(seq++, "td");
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "type", "number");
+            builder.AddAttribute(seq++, "step", "any");
+            builder.AddAttribute(seq++, "value", BindConverter.FormatValue(getter(setting)));
+            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<double>(this, value => setter(setting, value), getter(setting)));
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    private RenderFragment CrEditorCard(string label, string field) => builder =>
+    {
+        if (program is null) return;
+        var selected = GetSource(field);
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-editor-card");
+
+        // Title
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-editor-title");
+        builder.AddContent(seq++, label);
+        builder.CloseElement();
+
+        // Source buttons
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-source-group");
+        foreach (var option in SourceOptions(field))
+        {
+            var capturedOption = option;
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "type", "button");
+            builder.AddAttribute(seq++, "class", $"cr-source-btn {(selected == option ? "active" : "")}");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => SetSource(field, capturedOption)));
+            builder.AddContent(seq++, SourceLabel(option));
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+
+        // Value input/display
+        if (field == "RevCgs" && selected == "Cluster")
+        {
+            builder.OpenElement(seq++, "select");
+            builder.AddAttribute(seq++, "class", "dropDownList1 cr-editor-input");
+            builder.AddAttribute(seq++, "value", program.RevCgsCluster);
+            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<string>(this, v => program.RevCgsCluster = v ?? "", program.RevCgsCluster));
+            foreach (var cluster in program.CgsClusters)
+            {
+                builder.OpenElement(seq++, "option");
+                builder.AddAttribute(seq++, "value", cluster.Name);
+                builder.AddContent(seq++, cluster.Name);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+        }
+        else if (selected == "Custom")
+        {
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "type", "number");
+            builder.AddAttribute(seq++, "step", "any");
+            builder.AddAttribute(seq++, "class", "textBoxStyle4 cr-editor-input");
+            builder.AddAttribute(seq++, "value", BindConverter.FormatValue(GetCustomValue(field)));
+            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<double>(this, v => SetCustomValue(field, v), GetCustomValue(field)));
+            builder.CloseElement();
+        }
+
+        // Resolved value strip
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-resolved");
+        builder.OpenElement(seq++, "span");
+        builder.AddAttribute(seq++, "class", "cr-resolved-label");
+        builder.AddContent(seq++, "Effective value");
+        builder.CloseElement();
+        builder.OpenElement(seq++, "span");
+        builder.AddAttribute(seq++, "class", "cr-resolved-value");
+        builder.AddContent(seq++, FormatNumber(ResolvedValue(field)));
+        builder.CloseElement();
+        builder.CloseElement();
+
+        builder.CloseElement(); // cr-editor-card
+    };
+
+    private async Task PersistProgram()
+    {
+        if (program is null) return;
+
+        saveError = null;
+        statusMessage = null;
+        try
+        {
+            program.Settings = program.Settings.Select((setting, index) =>
+            {
+                setting.Year = index;
+                return setting;
+            }).ToList();
+            await ProgramSvc.SaveDetailsAsync(program);
+            program.SaveDate = DateTime.Now;
+            statusMessage = "Program saved successfully.";
+        }
+        catch (Exception ex)
+        {
+            saveError = $"Error saving program: {ex.Message}";
+        }
+    }
+
+    private async Task RunCalculation()
+    {
+        if (program is null) return;
+
+        isCalculating = true;
+        calcError = null;
+        statusMessage = null;
+        exportBytes = null;
+        expandedYears.Clear();
+        try
+        {
+            await PersistProgram();
+            if (!string.IsNullOrWhiteSpace(saveError)) return;
+
+            calculationResult = CalculationSvc.Calculate(program);
+            exportBytes = ExportSvc.GenerateResultsWorkbook(calculationResult, program);
+            statusMessage = "Calculation complete.";
+            pendingChartRender = true;
+        }
+        catch (Exception ex)
+        {
+            calculationResult = null;
+            calcError = ex.Message;
+        }
+        finally
+        {
+            isCalculating = false;
+        }
+    }
+
+    private async Task RenderCharts()
+    {
+        if (calculationResult is null || program is null) return;
+
+        var labels = calculationResult.CostResults.Select(r => r.CalendarYear.ToString()).ToArray();
+        var facultyCosts = calculationResult.CostResults.Select(r => r.FacultyCost).ToArray();
+        var nonFacCosts = calculationResult.CostResults.Select(r => r.NonFacultyCost).ToArray();
+        var revenues = calculationResult.CostResults.Select(r => r.FacultyRevenue).ToArray();
+
+        await JS.InvokeVoidAsync("chartHelpers.renderCostRevenue",
+            "costRevenueChart", labels, facultyCosts, nonFacCosts, revenues);
+
+        var cohortIndices = calculationResult.HourResults
+            .Select(h => h.CohortStartYearIndex).Distinct().OrderBy(i => i).ToList();
+
+        var cohortDatasets = cohortIndices.Select(ci => new
+        {
+            label = $"Intake {program.StartYear + ci}",
+            data = calculationResult.CostResults.Select(cr =>
+                calculationResult.HourResults
+                    .Where(h => h.ForecastYearIndex == cr.YearIndex && h.CohortStartYearIndex == ci)
+                    .Sum(h => h.DomesticEftsl + h.InternationalEftsl + h.CgsEftsl)
+            ).ToArray()
+        }).ToArray();
+
+        await JS.InvokeVoidAsync("chartHelpers.renderEftslRampup",
+            "eftslRampupChart", labels, cohortDatasets);
+    }
+
+    private void ToggleYear(int yearIndex)
+    {
+        if (!expandedYears.Remove(yearIndex))
+            expandedYears.Add(yearIndex);
+    }
+
+    private async Task DownloadExcel()
+    {
+        if (exportBytes is null || program is null) return;
+        var filename = $"{program.Name.Replace(" ", "_")}_Results.xlsx";
+        await JS.InvokeVoidAsync("fileHelpers.download", filename, Convert.ToBase64String(exportBytes));
+    }
+
+    private void AddProjectionYear()
+    {
+        if (program is null || program.Settings.Count >= 15) return;
+        program.Settings.Add(new ProgramYearSettingDto { Year = program.Settings.Count });
+    }
+
+    private void RemoveProjectionYear()
+    {
+        if (program is null || program.Settings.Count <= 1) return;
+        program.Settings.RemoveAt(program.Settings.Count - 1);
+    }
+
+    private void AddDegreeYear()
+    {
+        degreeYearCount++;
+    }
+
+    private void RemoveDegreeYear()
+    {
+        if (program is null || DegreeYearCount <= 1) return;
+        program.Units.RemoveAll(u => u.ProgramYear == DegreeYearCount);
+        degreeYearCount = Math.Max(1, degreeYearCount - 1);
+    }
+
+    private void OpenUnitPicker(int year, ProgramUnitDto? unit = null)
+    {
+        if (program is null) return;
+        unitPickerYear = year;
+        editingUnit = unit;
+
+        // If editing a unit not in UnitOptions (custom-named), treat as "New Unit" with the name pre-filled
+        if (unit is not null && !program.UnitOptions.Any(o => o.Name == unit.Unit))
+        {
+            selectedPickerUnit = "New Unit";
+            newUnitCustomName = unit.Unit;
+        }
+        else
+        {
+            selectedPickerUnit = unit?.Unit ?? "New Unit";
+            newUnitCustomName = "";
+        }
+
+        selectedPickerProfile = unit?.Profile ?? program.Profiles.FirstOrDefault()?.Name ?? "Standard";
+
+        if (unit?.Profile == "Custom")
+        {
+            customTutSize = unit.CustomTutSize ?? 20;
+            customLectHours = unit.CustomLectHours ?? 0;
+            customTutHours = unit.CustomTutHours ?? 0;
+            customPrepHours = unit.CustomPrepHours ?? 0;
+            customAdminHours = unit.CustomAdminHours ?? 0;
+            customStudentHours = unit.CustomStudentHours ?? 0;
+        }
+        else
+        {
+            customTutSize = 20;
+            customLectHours = 0;
+            customTutHours = 0;
+            customPrepHours = 0;
+            customAdminHours = 0;
+            customStudentHours = 0;
+        }
+
+        unitPickerError = false;
+        unitSearch = "";
+        unitSchoolFilter = "";
+        isUnitPickerOpen = true;
+    }
+
+    private void CloseUnitPicker()
+    {
+        isUnitPickerOpen = false;
+        editingUnit = null;
+    }
+
+    private void UnitPickerOverlayClick()
+    {
+        CloseUnitPicker();
+    }
+
+    private void SelectPickerUnit(string unit)
+    {
+        selectedPickerUnit = unit;
+        unitPickerError = false;
+    }
+
+    private void ConfirmUnitPicker()
+    {
+        if (program is null) return;
+
+        var unitName = selectedPickerUnit == "New Unit"
+            ? (string.IsNullOrWhiteSpace(newUnitCustomName) ? "New Unit" : newUnitCustomName.Trim())
+            : selectedPickerUnit;
+
+        if (string.IsNullOrWhiteSpace(unitName))
+        {
+            unitPickerError = true;
+            return;
+        }
+
+        if (editingUnit is null)
+        {
+            var newUnit = new ProgramUnitDto
+            {
+                Unit = unitName,
+                Profile = selectedPickerProfile,
+                ProgramYear = unitPickerYear
+            };
+            if (selectedPickerProfile == "Custom")
+            {
+                newUnit.CustomTutSize = customTutSize;
+                newUnit.CustomLectHours = customLectHours;
+                newUnit.CustomTutHours = customTutHours;
+                newUnit.CustomPrepHours = customPrepHours;
+                newUnit.CustomAdminHours = customAdminHours;
+                newUnit.CustomStudentHours = customStudentHours;
+            }
+            program.Units.Add(newUnit);
+        }
+        else
+        {
+            editingUnit.Unit = unitName;
+            editingUnit.Profile = selectedPickerProfile;
+            editingUnit.ProgramYear = unitPickerYear;
+            if (selectedPickerProfile == "Custom")
+            {
+                editingUnit.CustomTutSize = customTutSize;
+                editingUnit.CustomLectHours = customLectHours;
+                editingUnit.CustomTutHours = customTutHours;
+                editingUnit.CustomPrepHours = customPrepHours;
+                editingUnit.CustomAdminHours = customAdminHours;
+                editingUnit.CustomStudentHours = customStudentHours;
+            }
+            else
+            {
+                editingUnit.CustomTutSize = null;
+                editingUnit.CustomLectHours = null;
+                editingUnit.CustomTutHours = null;
+                editingUnit.CustomPrepHours = null;
+                editingUnit.CustomAdminHours = null;
+                editingUnit.CustomStudentHours = null;
+            }
+        }
+
+        calculationResult = null;
+        CloseUnitPicker();
+    }
+
+    private void RemoveUnit(ProgramUnitDto unit)
+    {
+        program?.Units.Remove(unit);
+        calculationResult = null;
+    }
+
+    private void SelectModelValue(ModelValueSummaryDto value)
+    {
+        if (program is null) return;
+        program.SchoolSelect = value.School;
+        program.CareerSelect = value.Career;
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        activeTab = tab;
+        if (tab == "Results" && calculationResult is not null)
+            pendingChartRender = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (pendingChartRender)
+        {
+            pendingChartRender = false;
+            await RenderCharts();
+        }
+    }
+
+    private void MoveToNextTab()
+    {
+        var nextTab = tabs[Math.Min(Array.IndexOf(tabs, activeTab) + 1, tabs.Length - 1)];
+        SetActiveTab(nextTab);
+    }
+
+    private string GetSource(string field) => field switch
+    {
+        "RevCgs" => program?.RevCgsSelect ?? "Custom",
+        "RevDom" => program?.RevDomSelect ?? "Custom",
+        "RevInt" => program?.RevIntSelect ?? "Custom",
+        "Cph" => program?.CphSelect ?? "Custom",
+        "Nfc" => program?.NfcSelect ?? "Custom",
+        _ => "Custom"
+    };
+
+    private void SetSource(string field, string value)
+    {
+        if (program is null) return;
+        switch (field)
+        {
+            case "RevCgs": program.RevCgsSelect = value; break;
+            case "RevDom": program.RevDomSelect = value; break;
+            case "RevInt": program.RevIntSelect = value; break;
+            case "Cph": program.CphSelect = value; break;
+            case "Nfc": program.NfcSelect = value; break;
+        }
+    }
+
+    private double GetCustomValue(string field) => field switch
+    {
+        "RevCgs" => program?.RevCgsCustom ?? 0,
+        "RevDom" => program?.RevDomCustom ?? 0,
+        "RevInt" => program?.RevIntCustom ?? 0,
+        "Cph" => program?.CphCustom ?? 0,
+        "Nfc" => program?.NfcCustom ?? 0,
+        _ => 0
+    };
+
+    private void SetCustomValue(string field, double value)
+    {
+        if (program is null) return;
+        switch (field)
+        {
+            case "RevCgs": program.RevCgsCustom = value; break;
+            case "RevDom": program.RevDomCustom = value; break;
+            case "RevInt": program.RevIntCustom = value; break;
+            case "Cph": program.CphCustom = value; break;
+            case "Nfc": program.NfcCustom = value; break;
+        }
+    }
+
+    private double GetModelValue(string field) => field switch
+    {
+        "RevCgs" => SelectedModelValue?.RevCgsPerEftsl ?? 0,
+        "RevDom" => SelectedModelValue?.RevDomPerEftsl ?? 0,
+        "RevInt" => SelectedModelValue?.RevIntPerEftsl ?? 0,
+        "Cph" => SelectedModelValue?.CostPerHour ?? 0,
+        "Nfc" => SelectedModelValue?.NonCostPerEftsl ?? 0,
+        _ => 0
+    };
+
+    private double ResolvedValue(string field) => GetSource(field) switch
+    {
+        "Model" => GetModelValue(field),
+        "Cluster" when field == "RevCgs" =>
+            program?.CgsClusters.FirstOrDefault(c => c.Name == program.RevCgsCluster)?.Value ?? GetCustomValue(field),
+        _ => GetCustomValue(field)
+    };
+
+    private bool HasSnowflakeSource => !string.IsNullOrWhiteSpace(program?.SourceDb);
+
+    private IEnumerable<string> SourceOptions(string field)
+    {
+        // "Model" requires live Snowflake data — not available for manual scenarios
+        if (!HasSnowflakeSource)
+            return field == "RevCgs" ? ["Custom", "Cluster"] : ["Custom"];
+        return field == "RevCgs" ? ["Custom", "Cluster", "Model"] : ["Custom", "Model"];
+    }
+
+    private static string SourceLabel(string source) => source switch
+    {
+        "Cluster" => "CGS Cluster",
+        "Model" => "Model Value",
+        _ => source
+    };
+
+    private static string TabLabel(string tab) => tab switch
+    {
+        "InputData" => "Input Data",
+        "CostRevenue" => "Cost & Revenue",
+        "BreakEven" => "Breakeven",
+        _ => tab
+    };
+
+    private static string TabIcon(string tab) => tab switch
+    {
+        "Details" => "fa-solid fa-circle-info",
+        "InputData" => "fa-solid fa-table-columns",
+        "Profiles" => "fa-solid fa-sliders",
+        "CostRevenue" => "fa-solid fa-circle-dollar-to-slot",
+        "Results" => "fa-solid fa-square-poll-vertical",
+        "BreakEven" => "fa-solid fa-chart-line",
+        "Compare" => "fa-solid fa-ranking-star",
+        _ => "fa-solid fa-circle"
+    };
+
+    private List<int> RampCohorts => calculationResult?.HourResults
+        .Select(h => h.CohortStartYearIndex).Distinct().OrderBy(i => i).ToList()
+        ?? new List<int>();
+
+    // ── Details tab computed state ────────────────────────────────
+    private bool InputDataReady => program?.Settings.Any(s => s.DomesticEftsl + s.InternationalEftsl + s.CgsEftsl > 0) ?? false;
+    private bool UnitsReady => (program?.Units.Count ?? 0) > 0;
+    private bool CostRevenueReady => ResolvedValue("Cph") > 0 && ResolvedValue("Nfc") > 0;
+    private double PeakEftsl => calculationResult?.CostResults.Max(r => r.TotalEftsl) ?? 0;
+    private int PeakCalendarYear => calculationResult?.CostResults.OrderByDescending(r => r.TotalEftsl).FirstOrDefault()?.CalendarYear ?? 0;
+    private double TotalRevenue => calculationResult?.CostResults.Sum(r => r.FacultyRevenue) ?? 0;
+    private double AvgMarginPercent => (calculationResult?.CostResults.Count ?? 0) > 0
+        ? calculationResult!.CostResults.Average(r => r.TotalMarginPercent) : 0;
+
+    // ── JS interop ────────────────────────────────────────────────
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private static string FormatDate(DateTime? date) => date?.ToString("dd MMM yyyy") ?? "";
+    private static string FormatNumber(double value) => value.ToString("N2");
+    private static string FormatCurrency(double value) => value.ToString("C0");
+    private static string FormatPercent(double value) => value.ToString("P1");
+}

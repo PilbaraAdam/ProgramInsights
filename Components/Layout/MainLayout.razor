@@ -1,0 +1,54 @@
+@inherits LayoutComponentBase
+
+<nav class="app-navbar">
+    <div class="app-navbar-inner">
+        <a class="app-brand" href="/" title="Home">
+            <img src="img/pilbara-logo.png" class="app-brand-logo" alt="Pilbara" />
+            <span class="app-brand-divider"></span>
+            <span class="app-brand-title">Program Insights</span>
+        </a>
+
+        <div class="app-nav-icons">
+            <a class="app-nav-icon-link" href="#" title="Help">
+                <i class="fa-solid fa-circle-question"></i>
+            </a>
+            <a class="app-nav-icon-link" href="https://pilbaragroup.atlassian.net/servicedesk/customer/portals"
+               target="_blank" title="Support">
+                <i class="fa-solid fa-headset"></i>
+            </a>
+            <div class="dropdown">
+                <a class="app-nav-icon-link" href="#" data-bs-toggle="dropdown" title="Settings">
+                    <i class="fa-solid fa-gear"></i>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end app-dropdown">
+                    <li><a class="dropdown-item" href="/constants"><i class="fa-solid fa-sliders me-2"></i>Constants</a></li>
+                </ul>
+            </div>
+            <div class="dropdown">
+                <a class="app-nav-icon-link" href="#" data-bs-toggle="dropdown" title="My Profile">
+                    <i class="fa-regular fa-circle-user"></i>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end app-dropdown">
+                    <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user me-2"></i>@UserName</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="/about"><i class="fa-solid fa-circle-info me-2"></i>About</a></li>
+                    <li><a class="dropdown-item" href="/privacy"><i class="fa-solid fa-shield-halved me-2"></i>Privacy policy</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" style="color:#ef4444;"><i class="fa-solid fa-right-from-bracket me-2"></i>Log Out</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</nav>
+
+@Body
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private string UserName => "User";
+}

@@ -1,0 +1,16 @@
+## .NET / Blazor
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.userprefs
+
+## Secrets / config overrides
+appsettings.Development.json
+appsettings.*.json
+!appsettings.json
+
+## OS
+.DS_Store
+Thumbs.db

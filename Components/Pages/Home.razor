@@ -1,0 +1,823 @@
+@page "/"
+@rendermode InteractiveServer
+
+<PageTitle>Home - Program Insights</PageTitle>
+
+<!-- Left panel: scenario list -->
+<div class="modelPanel @(sidebarCollapsed ? "sidebar-collapsed" : "")">
+    <div class="sidebar-top-bar">
+        <span class="sidebar-title">Scenarios</span>
+        <button type="button" class="sidebar-toggle-btn"
+                title="@(sidebarCollapsed ? "Expand" : "Collapse")"
+                @onclick="() => sidebarCollapsed = !sidebarCollapsed">
+            <i class="fa-solid fa-@(sidebarCollapsed ? "chevron-right" : "chevron-left")"></i>
+        </button>
+    </div>
+    <div class="sidebar-body">
+        <button type="button" class="sidebar-new-scenario-btn" @onclick="OpenNewScenario">
+            <i class="fa-solid fa-plus"></i> New Scenario
+        </button>
+
+        @if (isLoadingScenarios)
+        {
+            <p class="no-data-hint" style="font-size:13px;">Loading…</p>
+        }
+        else if (loadError != null)
+        {
+            <p class="no-data-hint" style="font-size:13px;color:#ef4444;">@loadError</p>
+        }
+        else if (scenarios.Count == 0)
+        {
+            <p class="no-data-hint" style="font-size:13px;">No scenarios yet.</p>
+        }
+        else
+        {
+            <div class="scenario-card-list">
+                @foreach (var s in scenarios)
+                {
+                    <div class="scenario-card @(selectedScenarioId == s.Id ? "scenario-card-selected" : "")"
+                         @onclick="() => SelectScenario(s.Id)">
+                        <div class="scenario-card-top">
+                            <span class="scenario-card-name">@s.Name</span>
+                            <div class="scenario-card-actions">
+                                @if (!string.IsNullOrWhiteSpace(s.SourceDb))
+                                {
+                                    <button type="button" class="scenario-action-btn scenario-action-mapping" title="Data Mapping Wizard"
+                                            @onclick:stopPropagation="true"
+                                            @onclick='() => Nav.NavigateTo($"/scenario/{s.Id}/mapping?db={Uri.EscapeDataString(s.SourceDb)}")'>
+                                        <i class="fa-solid fa-diagram-project"></i>
+                                    </button>
+                                }
+                                <button type="button" class="scenario-action-btn" title="Edit"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="() => OpenEditScenario(s)">
+                                    <i class="fa-solid fa-pen-to-square"></i>
+                                </button>
+                                <button type="button" class="scenario-action-btn scenario-action-delete" title="Delete"
+                                        @onclick:stopPropagation="true"
+                                        @onclick="() => DeleteScenario(s.Id)">
+                                    <i class="fa-solid fa-trash-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="scenario-card-footer">
+                            @if (!string.IsNullOrWhiteSpace(s.SourceDb))
+                            {
+                                <span class="scenario-sf-badge" title="@s.SourceDb">
+                                    <i class="fa-solid fa-database"></i> @s.SourceDb
+                                </span>
+                                @if (s.HasMappingConfig)
+                                {
+                                    <span class="scenario-meta-mapped"><i class="fa-solid fa-circle-check"></i> Mapped</span>
+                                }
+                                else
+                                {
+                                    <span class="scenario-meta-unmapped"><i class="fa-solid fa-circle-exclamation"></i> Not mapped</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="guide-source-manual"><i class="fa-solid fa-file-pen"></i> Manual</span>
+                            }
+                            <span class="scenario-card-count">@s.ProgramCount prg</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Right panel: programs -->
+<div class="programPanel @(sidebarCollapsed ? "sidebar-collapsed" : "")">
+    <div class="tabContainer">
+
+        <!-- Tab bar -->
+        <div class="tab">
+            <div class="tabLeftSize">
+                <button type="button" class="tablinks @(activeTab == "Programs" ? "active" : "")"
+                        @onclick='() => activeTab = "Programs"'>
+                    <i class="fa-solid fa-list"></i> Programs
+                </button>
+                <button type="button" class="tablinks @(activeTab == "Profiles" ? "active" : "")"
+                        @onclick='() => activeTab = "Profiles"'>
+                    <i class="fa-solid fa-sliders"></i> Scenario Profiles
+                </button>
+                <button type="button" class="tablinks @(activeTab == "Guide" ? "active" : "")"
+                        @onclick='() => activeTab = "Guide"'>
+                    <i class="fa-solid fa-circle-question"></i> Getting Started
+                </button>
+            </div>
+        </div>
+
+        <!-- Programs tab -->
+        @if (activeTab == "Programs")
+        {
+            <div class="tabcontent" style="display:block;">
+                <div class="programs-toolbar">
+                    <h2 class="panel-title">Programs</h2>
+                    @if (selectedScenarioId.HasValue)
+                    {
+                        <div class="toolbar-right">
+                            <input type="text" class="search-input" placeholder="Search…"
+                                   @bind="programSearch" @bind:event="oninput" />
+                            <button type="button" class="button1"
+                                    @onclick="OpenNewProgram">
+                                + New Program
+                            </button>
+                        </div>
+                    }
+                </div>
+
+                @if (!selectedScenarioId.HasValue)
+                {
+                    @if (scenarios.Count == 0 && !isLoadingScenarios)
+                    {
+                        <div class="welcome-hero">
+                            <div class="welcome-icon"><i class="fa-solid fa-chart-line"></i></div>
+                            <h2 class="welcome-title">Welcome to Program Insights</h2>
+                            <p class="welcome-body">
+                                Model and forecast the financial performance of your academic programs.<br />
+                                Start by creating your first scenario.
+                            </p>
+                            <button type="button" class="button1 welcome-cta" @onclick="OpenNewScenario">
+                                <i class="fa-solid fa-plus"></i> Create First Scenario
+                            </button>
+                            <div class="welcome-steps">
+                                <div class="welcome-step">
+                                    <span class="welcome-step-num">1</span>
+                                    <span class="welcome-step-label">Create a scenario</span>
+                                </div>
+                                <div class="welcome-step-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+                                <div class="welcome-step">
+                                    <span class="welcome-step-num">2</span>
+                                    <span class="welcome-step-label">Add programs</span>
+                                </div>
+                                <div class="welcome-step-arrow"><i class="fa-solid fa-chevron-right"></i></div>
+                                <div class="welcome-step">
+                                    <span class="welcome-step-num">3</span>
+                                    <span class="welcome-step-label">Calculate results</span>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    else if (scenarios.Count > 0)
+                    {
+                        <div class="scenario-picker-prompt">
+                            <div class="spp-header">
+                                <i class="fa-solid fa-folder-open"></i>
+                                <span>@scenarios.Count scenario@(scenarios.Count == 1 ? "" : "s") — select one to view its programs</span>
+                            </div>
+                            <div class="scenario-chips">
+                                @foreach (var s in scenarios)
+                                {
+                                    <button type="button" class="scenario-chip" @onclick="() => SelectScenario(s.Id)">
+                                        <span class="scenario-chip-name">@s.Name</span>
+                                        @if (!string.IsNullOrWhiteSpace(s.SourceDb))
+                                        {
+                                            <span class="scenario-chip-db">
+                                                <i class="fa-solid fa-database"></i> @s.SourceDb
+                                            </span>
+                                        }
+                                        <i class="fa-solid fa-chevron-right scenario-chip-arrow"></i>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+                else if (isLoadingPrograms)
+                {
+                    <span class="no-data-hint">Loading…</span>
+                }
+                else if (filteredPrograms.Count == 0)
+                {
+                    <span class="no-data-hint">No programs found.</span>
+                }
+                else
+                {
+                    <table class="tableStyleChooseProgram fixedTableWidth">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Years</th>
+                                <th>Last Saved</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in filteredPrograms)
+                            {
+                                <tr class="selectable-row" @onclick="() => OpenProgram(p.Id)">
+                                    <td>
+                                        <span class="program-name-link">@p.Name</span>
+                                        @if (!string.IsNullOrWhiteSpace(p.Description))
+                                        {
+                                            <div class="program-desc-small">@p.Description</div>
+                                        }
+                                    </td>
+                                    <td>
+                                        <div class="prog-status-row">
+                                            <span class="prog-stat @(p.UnitCount > 0 ? "stat-ok" : "stat-warn")">
+                                                <i class="fa-solid fa-@(p.UnitCount > 0 ? "circle-check" : "circle-exclamation")"></i>
+                                                @(p.UnitCount > 0 ? $"{p.UnitCount} unit{(p.UnitCount == 1 ? "" : "s")}" : "No units")
+                                            </span>
+                                            <span class="prog-stat @(p.HasCostRevenue ? "stat-ok" : "stat-warn")">
+                                                <i class="fa-solid fa-@(p.HasCostRevenue ? "circle-check" : "circle-exclamation")"></i>
+                                                @(p.HasCostRevenue ? "Cost & Revenue" : "Cost needed")
+                                            </span>
+                                        </div>
+                                    </td>
+                                    <td class="date-cell">
+                                        @if (p.YearCount > 0)
+                                        {
+                                            <span>@p.StartYear – @(p.StartYear + p.YearCount - 1)</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="no-data-hint" style="font-size:11px;">—</span>
+                                        }
+                                    </td>
+                                    <td class="date-cell">@p.SaveDate?.ToString("dd MMM yyyy")</td>
+                                    <td>
+                                        <button type="button" class="row-icon-btn row-icon-delete"
+                                                @onclick:stopPropagation="true"
+                                                @onclick="() => DeleteProgram(p.Id)">
+                                            <i class="fas fa-trash-alt"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+
+        <!-- Profiles tab -->
+        @if (activeTab == "Profiles")
+        {
+            <div class="tabcontent" style="display:block; padding:20px 28px;">
+                <h2 class="panel-title">Profiles</h2>
+                <p class="no-data-hint">Profile management coming soon.</p>
+            </div>
+        }
+
+        <!-- Getting Started tab -->
+        @if (activeTab == "Guide")
+        {
+            <div class="tabcontent guide-tab" style="display:block;">
+                <div class="guide-header">
+                    <div class="guide-hero-icon"><i class="fa-solid fa-chart-line"></i></div>
+                    <div>
+                        <h2 class="guide-title">Program Insights</h2>
+                        <p class="guide-subtitle">Model and forecast the financial performance of your academic programs.</p>
+                    </div>
+                </div>
+
+                <div class="guide-body">
+                    <div class="guide-steps-col">
+                        <h3 class="guide-section-heading">How it works</h3>
+                        <ol class="guide-steps">
+                            <li class="guide-step">
+                                <div class="guide-step-num">1</div>
+                                <div class="guide-step-body">
+                                    <span class="guide-step-title">Create a scenario</span>
+                                    <p class="guide-step-desc">A scenario is a planning context — a name and optionally a Snowflake database to pull financial model data from. Create one for each planning cycle or what-if analysis you want to track separately.</p>
+                                </div>
+                            </li>
+                            <li class="guide-step">
+                                <div class="guide-step-num">2</div>
+                                <div class="guide-step-body">
+                                    <span class="guide-step-title">Map the data source <span class="guide-step-optional">(Snowflake scenarios only)</span></span>
+                                    <p class="guide-step-desc">Use the <strong>Data Mapping Wizard</strong> to connect your Snowflake database to Program Insights. The wizard detects your schema structure and lets you choose which columns map to revenue, costs, EFTSL, and fee types.</p>
+                                </div>
+                            </li>
+                            <li class="guide-step">
+                                <div class="guide-step-num">3</div>
+                                <div class="guide-step-body">
+                                    <span class="guide-step-title">Add programs</span>
+                                    <p class="guide-step-desc">A program represents a degree or course offering. Give it a name, a start year, and a number of projection years. Programs inherit the scenario's financial data but can be configured independently.</p>
+                                </div>
+                            </li>
+                            <li class="guide-step">
+                                <div class="guide-step-num">4</div>
+                                <div class="guide-step-body">
+                                    <span class="guide-step-title">Configure each program</span>
+                                    <p class="guide-step-desc">Inside a program, set enrolment projections, assign units to each degree year, and choose cost and revenue sources. Profiles control how teaching hours are distributed across unit types.</p>
+                                </div>
+                            </li>
+                            <li class="guide-step">
+                                <div class="guide-step-num">5</div>
+                                <div class="guide-step-body">
+                                    <span class="guide-step-title">Calculate and export</span>
+                                    <p class="guide-step-desc">Run a calculation to generate year-by-year EFTSL ramp-up, revenue, cost, and margin projections. Results can be exported to Excel for further analysis or reporting.</p>
+                                </div>
+                            </li>
+                        </ol>
+                    </div>
+
+                    <div class="guide-scenarios-col">
+                        <h3 class="guide-section-heading">Your scenarios</h3>
+                        @if (isLoadingScenarios)
+                        {
+                            <p class="no-data-hint" style="font-size:13px;">Loading…</p>
+                        }
+                        else if (scenarios.Count == 0)
+                        {
+                            <div class="guide-no-scenarios">
+                                <p class="no-data-hint" style="margin-bottom:12px;">No scenarios yet. Create your first one to get started.</p>
+                                <button type="button" class="button1" @onclick="OpenNewScenario">
+                                    <i class="fa-solid fa-plus"></i> Create Scenario
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="guide-scenario-list">
+                                @foreach (var s in scenarios)
+                                {
+                                    <div class="guide-scenario-card @(selectedScenarioId == s.Id ? "guide-scenario-selected" : "")"
+                                         @onclick='() => OpenScenarioFromGuide(s.Id)'>
+                                        <div class="guide-scenario-card-main">
+                                            <span class="guide-scenario-name">@s.Name</span>
+                                            <div class="guide-scenario-badges">
+                                                @if (!string.IsNullOrWhiteSpace(s.SourceDb))
+                                                {
+                                                    <span class="scenario-sf-badge">
+                                                        <i class="fa-solid fa-database"></i> @s.SourceDb
+                                                    </span>
+                                                    @if (s.HasMappingConfig)
+                                                    {
+                                                        <span class="scenario-meta-mapped"><i class="fa-solid fa-circle-check"></i> Mapped</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="scenario-meta-unmapped"><i class="fa-solid fa-circle-exclamation"></i> Not mapped</span>
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    <span class="guide-source-manual"><i class="fa-solid fa-file-pen"></i> Manual</span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="guide-scenario-card-meta">
+                                            <span class="scenario-meta-count">@s.ProgramCount program@(s.ProgramCount == 1 ? "" : "s")</span>
+                                            <i class="fa-solid fa-chevron-right guide-scenario-arrow"></i>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                            <button type="button" class="button2" style="margin-top:10px;" @onclick="OpenNewScenario">
+                                <i class="fa-solid fa-plus"></i> New Scenario
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+    </div>
+</div>
+
+<!-- New / Edit Scenario dialog -->
+<dialog id="scenarioDialog" class="app-dialog">
+    <div class="app-modal-card">
+        <button type="button" class="close-button" @onclick="CloseScenarioDialog" aria-label="Close">
+            <i class="fas fa-times fa-lg"></i>
+        </button>
+
+        <div class="popoutUnderline">
+            <h2>@(scenarioEditId.HasValue ? "Edit" : "New") Scenario</h2>
+        </div>
+
+        <div class="aboutRow">
+            <div class="leftColumnPopout">Name</div>
+            <div class="rightColumnPopout">
+                <input type="text" class="textBoxStyle4" @bind="scenarioName" placeholder="Scenario name" maxlength="36" />
+            </div>
+        </div>
+
+        <div style="margin-top:18px;">
+            <span class="meta-label" style="display:block;margin-bottom:10px;">Data Source</span>
+            <div class="scenario-source-options">
+                <button type="button" class="source-option-card @(!scenarioUseSnowflake ? "active" : "")"
+                        @onclick='() => scenarioUseSnowflake = false'>
+                    <i class="fa-solid fa-file-pen"></i>
+                    <div class="source-option-body">
+                        <span class="source-option-title">No Data Source</span>
+                        <span class="source-option-desc">Greenfield — enter all values manually</span>
+                    </div>
+                </button>
+                <button type="button" class="source-option-card @(scenarioUseSnowflake ? "active" : "")"
+                        @onclick='() => scenarioUseSnowflake = true'>
+                    <i class="fa-solid fa-database"></i>
+                    <div class="source-option-body">
+                        <span class="source-option-title">Snowflake Database</span>
+                        <span class="source-option-desc">Map from existing financial data</span>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        @if (scenarioUseSnowflake)
+        {
+            <div class="aboutRow" style="margin-top:14px;">
+                <div class="leftColumnPopout">Database</div>
+                <div class="rightColumnPopout">
+                    <div style="display:flex;gap:6px;">
+                        <input type="text" class="textBoxStyle4" @bind="scenarioSourceDb"
+                               placeholder="e.g. DEMO_CSA_INU" style="flex:1;min-width:0;" />
+                        <button type="button" class="button2" @onclick="ConnectSourceDb"
+                                disabled="@(isConnecting || string.IsNullOrWhiteSpace(scenarioSourceDb))">
+                            @if (isConnecting)
+                            {
+                                <i class="fa-solid fa-spinner fa-spin"></i>
+                            }
+                            else
+                            {
+                                <i class="fa-solid fa-plug"></i>
+                            }
+                            @(isConnecting ? " Testing…" : " Connect")
+                        </button>
+                    </div>
+                    @if (connectionOk == true)
+                    {
+                        <div class="connect-status connect-ok">
+                            <i class="fa-solid fa-circle-check"></i> @connectionMessage
+                        </div>
+                    }
+                    else if (connectionOk == false)
+                    {
+                        <div class="connect-status connect-fail">
+                            <i class="fa-solid fa-circle-xmark"></i> @connectionMessage
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(scenarioError))
+        {
+            <div class="mapping-error">@scenarioError</div>
+        }
+
+        <div class="tab-footer-actions" style="margin-top:20px;">
+            <span style="flex:1;"></span>
+            <button type="button" class="button2" @onclick="CloseScenarioDialog">Cancel</button>
+            <button type="button" class="button1" @onclick="SaveScenario" disabled="@isSaving">
+                @(isSaving ? "Saving…" : "Save Scenario")
+            </button>
+        </div>
+    </div>
+</dialog>
+
+<!-- New Program dialog -->
+<dialog id="programDialog" class="app-dialog-sm">
+    <div class="app-modal-card">
+        <button type="button" class="close-button" @onclick="CloseProgramDialog" aria-label="Close">
+            <i class="fas fa-times fa-lg"></i>
+        </button>
+
+        <div class="popoutUnderline"><h2>New Program</h2></div>
+
+        <div class="aboutRow">
+            <div class="leftColumnPopout">Name</div>
+            <div class="rightColumnPopout">
+                <input type="text" class="textBoxStyle4" @bind="programName" placeholder="Program name" maxlength="36" />
+            </div>
+        </div>
+        <div class="aboutRow" style="margin-top:14px;">
+            <div class="leftColumnPopout">Description</div>
+            <div class="rightColumnPopout">
+                <textarea class="textBoxStyle3" @bind="programDescription" placeholder="Optional" rows="3"></textarea>
+            </div>
+        </div>
+        <div class="aboutRow" style="margin-top:14px;">
+            <div class="leftColumnPopout">Start Year</div>
+            <div class="rightColumnPopout">
+                <select class="textBoxStyle4" @bind="programStartYear">
+                    @for (int y = 2020; y <= 2030; y++)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </select>
+            </div>
+        </div>
+        <div class="aboutRow" style="margin-top:14px;">
+            <div class="leftColumnPopout">Number of Years</div>
+            <div class="rightColumnPopout">
+                <select class="textBoxStyle4" @bind="programNumberOfYears">
+                    @for (int n = 1; n <= 14; n++)
+                    {
+                        <option value="@n">@n</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(programError))
+        {
+            <div class="mapping-error">@programError</div>
+        }
+
+        <div class="tab-footer-actions" style="margin-top:24px;">
+            <span style="flex:1;"></span>
+            <button type="button" class="button2" @onclick="CloseProgramDialog">Cancel</button>
+            <button type="button" class="button1" @onclick="SaveProgram" disabled="@isSaving">
+                @(isSaving ? "Creating…" : "Create Program")
+            </button>
+        </div>
+    </div>
+</dialog>
+
+@code {
+    // ── Services ───────────────────────────────────────────────────
+    [Inject] private ScenarioService ScenarioSvc { get; set; } = default!;
+    [Inject] private ProgramService ProgramSvc { get; set; } = default!;
+    [Inject] private DataMappingService MappingSvc { get; set; } = default!;
+    [Inject] private IConfiguration Config { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+
+    // ── State ──────────────────────────────────────────────────────
+    private string activeTab = "Guide";
+    private Guid? selectedScenarioId;
+    private string programSearch = "";
+    private bool sidebarCollapsed = false;
+
+    private bool isLoadingScenarios = true;
+    private bool isLoadingPrograms = false;
+    private bool isSaving = false;
+    private string? loadError;
+
+    // Scenario dialog
+    private Guid? scenarioEditId;
+    private string scenarioName = "";
+    private string scenarioSourceDb = "";
+    private bool scenarioUseSnowflake = false;
+    private string scenarioError = "";
+    private bool isConnecting = false;
+    private bool? connectionOk = null;
+    private string connectionMessage = "";
+
+    // Program dialog
+    private string programName = "";
+    private string programDescription = "";
+    private int programStartYear = DateTime.Today.Year;
+    private int programNumberOfYears = 5;
+    private string programError = "";
+
+    // ── Data ──────────────────────────────────────────────────────
+    private List<ScenarioDto> scenarios = new();
+    private List<ProgramDto> programs = new();
+
+    private List<ProgramDto> filteredPrograms =>
+        programs
+            .Where(p => string.IsNullOrEmpty(programSearch) ||
+                        p.Name.Contains(programSearch, StringComparison.OrdinalIgnoreCase) ||
+                        (p.Description?.Contains(programSearch, StringComparison.OrdinalIgnoreCase) ?? false))
+            .ToList();
+
+    // ── Lifecycle ─────────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        if (!ScenarioSvc.IsConfigured)
+        {
+            isLoadingScenarios = false;
+            return;
+        }
+
+        try
+        {
+            var tenantIdStr = Config["App:TenantId"] ?? "";
+            if (!Guid.TryParse(tenantIdStr, out var tenantId))
+            {
+                loadError = "TenantId not configured in appsettings.json.";
+                isLoadingScenarios = false;
+                return;
+            }
+            scenarios = await ScenarioSvc.GetAllAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Failed to load scenarios: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingScenarios = false;
+        }
+    }
+
+    // ── Scenario actions ───────────────────────────────────────────
+    private async Task SelectScenario(Guid id)
+    {
+        selectedScenarioId = id;
+        activeTab = "Programs";
+        programs = new();
+        isLoadingPrograms = true;
+        try
+        {
+            programs = await ProgramSvc.GetByScenarioAsync(id);
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Failed to load programs: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingPrograms = false;
+        }
+    }
+
+    private async Task OpenNewScenario()
+    {
+        scenarioEditId = null;
+        scenarioName = "";
+        scenarioSourceDb = "";
+        scenarioUseSnowflake = false;
+        scenarioError = "";
+        connectionOk = null;
+        connectionMessage = "";
+        await OpenDialog("scenarioDialog");
+    }
+
+    private async Task OpenEditScenario(ScenarioDto s)
+    {
+        scenarioEditId = s.Id;
+        scenarioName = s.Name;
+        scenarioSourceDb = s.SourceDb;
+        scenarioUseSnowflake = !string.IsNullOrWhiteSpace(s.SourceDb);
+        scenarioError = "";
+        connectionOk = null;
+        connectionMessage = "";
+        await OpenDialog("scenarioDialog");
+    }
+
+    private async Task CloseScenarioDialog() => await CloseDialog("scenarioDialog");
+
+    private async Task ConnectSourceDb()
+    {
+        connectionOk = null;
+        connectionMessage = "";
+        isConnecting = true;
+        try
+        {
+            var (ok, msg) = await MappingSvc.TestConnectionAsync(scenarioSourceDb);
+            connectionOk = ok;
+            connectionMessage = msg;
+        }
+        finally
+        {
+            isConnecting = false;
+        }
+    }
+
+    private async Task SaveScenario()
+    {
+        if (string.IsNullOrWhiteSpace(scenarioName)) { scenarioError = "Name is required."; return; }
+
+        if (!ScenarioSvc.IsConfigured)
+        {
+            scenarioError = "Snowflake connection not configured.";
+            return;
+        }
+
+        var tenantIdStr = Config["App:TenantId"] ?? "";
+        if (!Guid.TryParse(tenantIdStr, out var tenantId))
+        {
+            scenarioError = "TenantId not configured.";
+            return;
+        }
+
+        if (!scenarioUseSnowflake) scenarioSourceDb = "";
+
+        isSaving = true;
+        try
+        {
+            if (scenarioEditId.HasValue)
+            {
+                await ScenarioSvc.UpdateAsync(scenarioEditId.Value, scenarioName, scenarioSourceDb);
+                scenarios = await ScenarioSvc.GetAllAsync(tenantId);
+                await CloseScenarioDialog();
+            }
+            else
+            {
+                var newId = await ScenarioSvc.CreateAsync(tenantId, scenarioName, scenarioSourceDb);
+                scenarios = await ScenarioSvc.GetAllAsync(tenantId);
+                if (scenarioUseSnowflake && !string.IsNullOrWhiteSpace(scenarioSourceDb))
+                {
+                    await CloseScenarioDialog();
+                    Nav.NavigateTo($"/scenario/{newId}/mapping?db={Uri.EscapeDataString(scenarioSourceDb)}");
+                    return;
+                }
+                await CloseScenarioDialog();
+            }
+        }
+        catch (Exception ex)
+        {
+            scenarioError = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task DeleteScenario(Guid id)
+    {
+        if (!ScenarioSvc.IsConfigured) { scenarios.RemoveAll(x => x.Id == id); return; }
+
+        var tenantIdStr = Config["App:TenantId"] ?? "";
+        if (!Guid.TryParse(tenantIdStr, out var tenantId)) return;
+
+        try
+        {
+            await ScenarioSvc.DeleteAsync(tenantId, id);
+            scenarios.RemoveAll(x => x.Id == id);
+            if (selectedScenarioId == id) { selectedScenarioId = null; programs = new(); }
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Delete failed: {ex.Message}";
+        }
+    }
+
+    // ── Program actions ────────────────────────────────────────────
+    private async Task OpenNewProgram()
+    {
+        programName = "";
+        programDescription = "";
+        programStartYear = DateTime.Today.Year;
+        programNumberOfYears = 5;
+        programError = "";
+        await OpenDialog("programDialog");
+    }
+
+    private async Task CloseProgramDialog() => await CloseDialog("programDialog");
+
+    private async Task SaveProgram()
+    {
+        if (string.IsNullOrWhiteSpace(programName)) { programError = "Name is required."; return; }
+
+        if (!ProgramSvc.IsConfigured)
+        {
+            programError = "Snowflake connection not configured.";
+            return;
+        }
+
+        isSaving = true;
+        try
+        {
+            var newId = await ProgramSvc.CreateAsync(
+                selectedScenarioId!.Value, programName, programDescription,
+                programStartYear, programNumberOfYears);
+            await CloseProgramDialog();
+            Nav.NavigateTo($"/program/{newId}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            programError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            programError = $"Failed to create program: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task DeleteProgram(Guid id)
+    {
+        if (!ProgramSvc.IsConfigured) { programs.RemoveAll(x => x.Id == id); return; }
+        try
+        {
+            await ProgramSvc.DeleteAsync(selectedScenarioId!.Value, id);
+            programs.RemoveAll(x => x.Id == id);
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Delete failed: {ex.Message}";
+        }
+    }
+
+    private void OpenProgram(Guid id) => Nav.NavigateTo($"/program/{id}");
+
+    private async Task OpenScenarioFromGuide(Guid id)
+    {
+        activeTab = "Programs";
+        await SelectScenario(id);
+    }
+
+    // ── JS interop for native <dialog> ─────────────────────────────
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private async Task OpenDialog(string id) =>
+        await JS.InvokeVoidAsync("dialogHelpers.open", id);
+
+    private async Task CloseDialog(string id) =>
+        await JS.InvokeVoidAsync("dialogHelpers.close", id);
+}

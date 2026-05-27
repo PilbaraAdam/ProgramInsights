@@ -1,0 +1,764 @@
+@page "/scenario/{ScenarioId:guid}/mapping"
+@rendermode InteractiveServer
+
+<PageTitle>Data Mapping — Program Insights</PageTitle>
+
+<div class="content-container">
+    <ul class="breadcrumb">
+        <li><a href="/">Home</a></li>
+        <li>Data Mapping Wizard</li>
+    </ul>
+
+    <div class="wizard-header">
+        <h1 class="wizard-title">Data Mapping Wizard</h1>
+        <p class="wizard-subtitle">Connect your Snowflake source database and map it to Program Insights.</p>
+    </div>
+
+    <!-- Step indicator -->
+    <div class="wizard-steps">
+        @for (var i = 1; i <= StepLabels.Length; i++)
+        {
+            var idx = i;
+            var cls = idx < step ? "step-done" : idx == step ? "step-active" : "step-pending";
+            <div class="wizard-step @cls">
+                <div class="wizard-step-circle">
+                    @if (idx < step) { <i class="fa-solid fa-check"></i> }
+                    else { <span>@idx</span> }
+                </div>
+                <div class="wizard-step-label">@StepLabels[idx - 1]</div>
+            </div>
+            @if (idx < StepLabels.Length)
+            {
+                <div class="wizard-step-line @(idx < step ? "line-done" : "line-pending")"></div>
+            }
+        }
+    </div>
+
+    <!-- Content card -->
+    <div class="wizard-card">
+
+        @if (!string.IsNullOrEmpty(workError))
+        {
+            <div class="mapping-error" style="margin-bottom:16px;">@workError</div>
+        }
+
+        <!-- Step 1: Connect -->
+        @if (step == 1)
+        {
+            <h2 class="wizard-step-title">Step 1 — Connect</h2>
+            <p class="wizard-step-desc">Enter your Snowflake source database and schema, then discover the available tables to select your fact table (cube).</p>
+            <div class="wizard-field">
+                <label class="wizard-label">Source Database</label>
+                <input type="text" class="textBoxStyle4" @bind="config.SourceDatabase"
+                       placeholder="e.g. ECU_CSA_NEW_ALL" style="max-width:360px;" />
+            </div>
+            <div class="wizard-field">
+                <label class="wizard-label">Schema</label>
+                <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+                    <input type="text" class="textBoxStyle4" @bind="config.SourceSchema"
+                           placeholder="PUBLIC" style="max-width:200px;" />
+                    <button type="button" class="button2" @onclick="DiscoverTablesAsync" disabled="@(isWorking || string.IsNullOrWhiteSpace(config.SourceDatabase))">
+                        @if (isWorking && availableTables.Count == 0)
+                        {
+                            <i class="fa-solid fa-spinner fa-spin"></i>
+                        }
+                        else
+                        {
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                        }
+                        Discover Tables
+                    </button>
+                </div>
+                <span class="wizard-hint">Usually PUBLIC — the schema containing the fact and dimension tables.</span>
+            </div>
+            @if (availableTables.Count > 0)
+            {
+                <div class="wizard-field">
+                    <label class="wizard-label">Fact Table (Cube)</label>
+                    <select class="dropDownList1" style="max-width:400px;"
+                            value="@config.FactTable" @onchange="OnFactTableChangedAsync">
+                        @foreach (var t in availableTables)
+                        {
+                            <option value="@t">@t</option>
+                        }
+                    </select>
+                    <span class="wizard-hint">@availableTables.Count table@(availableTables.Count == 1 ? "" : "s") found. Select the fact table that contains GL/enrolment data.</span>
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(config.FactTable) && config.FactTable != "FACT_GL_TO_PRODUCTS_TO_COURSES")
+            {
+                <div class="wizard-field">
+                    <label class="wizard-label">Fact Table (Cube)</label>
+                    <input type="text" class="textBoxStyle4" @bind="config.FactTable" style="max-width:400px;" />
+                    <span class="wizard-hint">Saved from previous run. Click Discover Tables to refresh the list.</span>
+                </div>
+            }
+
+            @* — Structure detection result — *@
+            @if (isDetectingStructure)
+            {
+                <div class="structure-detect-status">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Detecting table structure…
+                </div>
+            }
+            else if (structureNote != null)
+            {
+                <div class="structure-detect-status @(structureConfident ? "sds-ok" : "sds-warn")">
+                    @if (structureConfident)
+                    {
+                        <i class="fa-solid fa-circle-check"></i>
+                        <span><strong>@StructureLabel(structurePreset)</strong> — @structureNote</span>
+                        <button type="button" class="sds-change-btn"
+                                @onclick="() => showStructurePicker = !showStructurePicker">
+                            @(showStructurePicker ? "▴ Hide" : "▾ Change")
+                        </button>
+                    }
+                    else
+                    {
+                        <i class="fa-solid fa-circle-question"></i>
+                        <span>@structureNote</span>
+                    }
+                </div>
+            }
+
+            @* — Manual picker: always shown when not confident, toggle when confident — *@
+            @if (showStructurePicker || (!structureConfident && structureNote != null))
+            {
+                <div class="wizard-field" style="margin-top:8px;">
+                    <div class="structure-presets">
+                        <button type="button" class="structure-btn @(structurePreset == "GL3" ? "structure-active" : "")"
+                                @onclick='() => SetStructurePreset("GL3")'>
+                            <div class="structure-title">GL → Units → Courses</div>
+                            <div class="structure-desc">CODE1 = GL &nbsp;·&nbsp; CODE2 = Units &nbsp;·&nbsp; CODE3 = Courses</div>
+                        </button>
+                        <button type="button" class="structure-btn @(structurePreset == "GL2" ? "structure-active" : "")"
+                                @onclick='() => SetStructurePreset("GL2")'>
+                            <div class="structure-title">GL → Courses (direct)</div>
+                            <div class="structure-desc">CODE1 = GL &nbsp;·&nbsp; CODE3 = Courses &nbsp;·&nbsp; no unit view</div>
+                        </button>
+                        <button type="button" class="structure-btn @(structurePreset == "U2" ? "structure-active" : "")"
+                                @onclick='() => SetStructurePreset("U2")'>
+                            <div class="structure-title">Units → Courses</div>
+                            <div class="structure-desc">CODE1 = Units &nbsp;·&nbsp; CODE2 = Courses &nbsp;·&nbsp; no GL join</div>
+                        </button>
+                    </div>
+                    @if (structurePreset == "GL2")
+                    {
+                        <span class="wizard-hint" style="color:#e07000;">Only a Course View will be created — no Unit View for this structure.</span>
+                    }
+                    else
+                    {
+                        <span class="wizard-hint">Both Course and Unit Views will be created.</span>
+                    }
+                </div>
+            }
+            @if (structurePreset == "U2")
+            {
+                <div class="wizard-field wizard-field-advanced">
+                    <label class="wizard-label">Unit Dimension Table <span class="wizard-optional">optional</span></label>
+                    <input type="text" class="textBoxStyle4" @bind="config.UnitDimTable"
+                           placeholder="PRODUCTS_OBJECTS" style="max-width:360px;" />
+                    <span class="wizard-hint">Table joined on CODE1 to get unit metadata. Default: PRODUCTS_OBJECTS.</span>
+                </div>
+            }
+            <div class="wizard-field wizard-field-advanced">
+                <label class="wizard-label">Fee Type Table <span class="wizard-optional">optional</span></label>
+                <input type="text" class="textBoxStyle4" @bind="config.FeeTypeTable"
+                       placeholder="COURSES_OBJECTS" style="max-width:360px;" />
+                <span class="wizard-hint">Table that maps courses to fee types. Leave as default if unsure — it can be corrected in Step 3.</span>
+            </div>
+            <div class="wizard-field wizard-field-advanced">
+                <label class="wizard-label">Fee Type Column <span class="wizard-optional">optional</span></label>
+                <input type="text" class="textBoxStyle4" @bind="config.FeeTypeColumn"
+                       placeholder="COURSE_FEE_TYPE" style="max-width:360px;" />
+                <span class="wizard-hint">Column in the above table holding the fee type code (e.g. Domestic, International).</span>
+            </div>
+        }
+
+        <!-- Step 2: Model & Period -->
+        @if (step == 2)
+        {
+            <h2 class="wizard-step-title">Step 2 — Model & Period</h2>
+            <p class="wizard-step-desc">Select which model and reporting period to use from the source data.</p>
+            <div class="wizard-field">
+                <label class="wizard-label">Model</label>
+                <select class="dropDownList1" style="max-width:360px;" @bind="config.ModelFilter">
+                    @foreach (var m in availableModels)
+                    {
+                        <option value="@m">@m</option>
+                    }
+                </select>
+                <span class="wizard-hint">@availableModels.Count distinct model value@(availableModels.Count == 1 ? "" : "s") found.</span>
+            </div>
+            <div class="wizard-field">
+                <label class="wizard-label">Period</label>
+                <select class="dropDownList1" style="max-width:360px;" @bind="config.PeriodFilter">
+                    @foreach (var p in availablePeriods)
+                    {
+                        <option value="@p">@p</option>
+                    }
+                </select>
+                <span class="wizard-hint">@availablePeriods.Count period@(availablePeriods.Count == 1 ? "" : "s") found, most recent first.</span>
+            </div>
+        }
+
+        <!-- Step 3: Fee Types -->
+        @if (step == 3)
+        {
+            <h2 class="wizard-step-title">Step 3 — Fee Type Classification</h2>
+            <p class="wizard-step-desc">Assign each fee type to its EFTSL and revenue category. A type can belong to one category or be left unassigned.</p>
+            @if (availableFeeTypes.Count == 0)
+            {
+                <div class="fee-type-empty">
+                    <p class="no-data-hint">No fee types were loaded — the table or column name may be different in your source database. Update the names below and click Retry, or click Next to skip fee type classification.</p>
+                    <div class="wizard-field" style="margin-top:16px;">
+                        <label class="wizard-label">Fee Type Table</label>
+                        <input type="text" class="textBoxStyle4" @bind="config.FeeTypeTable"
+                               placeholder="COURSES_OBJECTS" style="max-width:360px;" />
+                    </div>
+                    <div class="wizard-field">
+                        <label class="wizard-label">Fee Type Column</label>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                            <input type="text" class="textBoxStyle4" @bind="config.FeeTypeColumn"
+                                   placeholder="COURSE_FEE_TYPE" style="max-width:280px;" />
+                            <button type="button" class="button2" @onclick="RetryFeeTypesAsync" disabled="@isWorking">
+                                @if (isWorking)
+                                {
+                                    <i class="fa-solid fa-spinner fa-spin"></i>
+                                }
+                                else
+                                {
+                                    <i class="fa-solid fa-rotate-right"></i>
+                                }
+                                Retry
+                            </button>
+                        </div>
+                        <span class="wizard-hint">If your source has no fee type concept, leave blank and click Next to skip.</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <table class="fee-type-table">
+                    <thead>
+                        <tr>
+                            <th>Fee Type</th>
+                            <th>Domestic</th>
+                            <th>International</th>
+                            <th>CGS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var ft in availableFeeTypes)
+                        {
+                            var current = feeAssignments.GetValueOrDefault(ft, "None");
+                            <tr>
+                                <td class="fee-type-name">@ft</td>
+                                <td>
+                                    <button type="button"
+                                            class="fee-assign-btn @(current == "Dom" ? "fee-dom-active" : "")"
+                                            @onclick='() => SetFeeType(ft, current == "Dom" ? "None" : "Dom")'>
+                                        Dom
+                                    </button>
+                                </td>
+                                <td>
+                                    <button type="button"
+                                            class="fee-assign-btn @(current == "Int" ? "fee-int-active" : "")"
+                                            @onclick='() => SetFeeType(ft, current == "Int" ? "None" : "Int")'>
+                                        Int
+                                    </button>
+                                </td>
+                                <td>
+                                    <button type="button"
+                                            class="fee-assign-btn @(current == "Cgs" ? "fee-cgs-active" : "")"
+                                            @onclick='() => SetFeeType(ft, current == "Cgs" ? "None" : "Cgs")'>
+                                        CGS
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        }
+
+        <!-- Step 4: Column Mapping -->
+        @if (step == 4)
+        {
+            <h2 class="wizard-step-title">Step 4 — Column Mapping</h2>
+            <p class="wizard-step-desc">Map fact table columns to their financial roles. Tick all columns that contribute to each category.</p>
+            <div class="col-map-layout">
+                <div class="col-map-singles">
+                    <div class="wizard-field">
+                        <label class="wizard-label">Total Expense Column</label>
+                        <span class="wizard-hint">The column representing total expenditure per row.</span>
+                        <select class="dropDownList1" @bind="config.TotalExpCol">
+                            @foreach (var c in availableColumns)
+                            {
+                                <option value="@c">@c</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="wizard-field">
+                        <label class="wizard-label">Delivery Hours Column</label>
+                        <span class="wizard-hint">Academic contact hours column (e.g. SUPPLIED_AC_HOURS).</span>
+                        <select class="dropDownList1" @bind="config.DeliveryHoursCol">
+                            @foreach (var c in availableColumns)
+                            {
+                                <option value="@c">@c</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                <div class="col-map-groups">
+                    <div class="col-map-group">
+                        <div class="col-group-title">Faculty Cost Columns</div>
+                        <div class="col-group-hint">Non-faculty = Total Expense − Sum(Faculty)</div>
+                        <div class="col-checkbox-list">
+                            @foreach (var c in availableColumns)
+                            {
+                                <label class="col-checkbox">
+                                    <input type="checkbox" checked="@selFacCols.Contains(c)"
+                                           @onchange="e => ToggleSet(selFacCols, c, (bool)e.Value!)" />
+                                    @c
+                                </label>
+                            }
+                        </div>
+                    </div>
+                    <div class="col-map-group">
+                        <div class="col-group-title">Revenue — Domestic</div>
+                        <div class="col-checkbox-list">
+                            @foreach (var c in availableColumns)
+                            {
+                                <label class="col-checkbox">
+                                    <input type="checkbox" checked="@selRevDom.Contains(c)"
+                                           @onchange="e => ToggleSet(selRevDom, c, (bool)e.Value!)" />
+                                    @c
+                                </label>
+                            }
+                        </div>
+                    </div>
+                    <div class="col-map-group">
+                        <div class="col-group-title">Revenue — International</div>
+                        <div class="col-checkbox-list">
+                            @foreach (var c in availableColumns)
+                            {
+                                <label class="col-checkbox">
+                                    <input type="checkbox" checked="@selRevInt.Contains(c)"
+                                           @onchange="e => ToggleSet(selRevInt, c, (bool)e.Value!)" />
+                                    @c
+                                </label>
+                            }
+                        </div>
+                    </div>
+                    <div class="col-map-group">
+                        <div class="col-group-title">Revenue — CGS</div>
+                        <div class="col-checkbox-list">
+                            @foreach (var c in availableColumns)
+                            {
+                                <label class="col-checkbox">
+                                    <input type="checkbox" checked="@selRevCgs.Contains(c)"
+                                           @onchange="e => ToggleSet(selRevCgs, c, (bool)e.Value!)" />
+                                    @c
+                                </label>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Step 5: Build Views -->
+        @if (step == 5)
+        {
+            <h2 class="wizard-step-title">Step 5 — Review & Build Views</h2>
+            <p class="wizard-step-desc">Review the generated SQL, then click Build Views to create the cross-database views in Snowflake.</p>
+            <div class="sql-preview-block">
+                <div class="sql-preview-label">Course View SQL</div>
+                <pre class="sql-preview-code">@TruncateSql(MappingSvc.BuildCourseViewSql(config), 700)</pre>
+            </div>
+            <div class="sql-preview-block">
+                <div class="sql-preview-label">Unit View SQL</div>
+                <pre class="sql-preview-code">@TruncateSql(MappingSvc.BuildUnitViewSql(config), 700)</pre>
+            </div>
+            @if (viewsBuilt)
+            {
+                <div class="mapping-success">
+                    <i class="fa-solid fa-circle-check"></i>
+                    Views created successfully. Units and model values will be read live from your Snowflake source.
+                </div>
+            }
+        }
+
+        <!-- Wizard navigation -->
+        <div class="wizard-nav">
+            <button type="button" class="button2" @onclick="GoBack"
+                    disabled="@(step == 1 || isWorking)">
+                <i class="fa-solid fa-chevron-left"></i> Back
+            </button>
+            <span style="flex:1;"></span>
+            @if (step < 5)
+            {
+                <button type="button" class="button1" @onclick="GoNext" disabled="@isWorking">
+                    @if (isWorking)
+                    {
+                        <span><i class="fa-solid fa-spinner fa-spin"></i> Working…</span>
+                    }
+                    else
+                    {
+                        <span>Next <i class="fa-solid fa-chevron-right"></i></span>
+                    }
+                </button>
+            }
+            else if (!viewsBuilt)
+            {
+                <button type="button" class="button1" @onclick="BuildViews" disabled="@isWorking">
+                    @if (isWorking)
+                    {
+                        <span><i class="fa-solid fa-spinner fa-spin"></i> Building…</span>
+                    }
+                    else
+                    {
+                        <span><i class="fa-solid fa-hammer"></i> Build Views</span>
+                    }
+                </button>
+            }
+            else
+            {
+                <a href="/" class="button1" style="text-decoration:none;">
+                    <i class="fa-solid fa-house"></i> Return to Home
+                </a>
+            }
+        </div>
+
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid ScenarioId { get; set; }
+    [SupplyParameterFromQuery] private string? Db { get; set; }
+
+    [Inject] private DataMappingService MappingSvc { get; set; } = default!;
+    [Inject] private IConfiguration Config { get; set; } = default!;
+
+    private static readonly string[] StepLabels = ["Connect", "Filter", "Fee Types", "Columns", "Build Views"];
+
+    private int step = 1;
+    private string structurePreset = "GL3";
+    private string? structureNote;
+    private bool structureConfident;
+    private bool showStructurePicker;
+    private bool isDetectingStructure;
+    private ModelConfigDto config = new();
+    private List<string> availableTables = new();
+    private List<string> availableModels = new();
+    private List<string> availablePeriods = new();
+    private List<string> availableFeeTypes = new();
+    private List<string> availableColumns = new();
+    private Dictionary<string, string> feeAssignments = new();
+    private HashSet<string> selFacCols = new();
+    private HashSet<string> selRevDom = new();
+    private HashSet<string> selRevInt = new();
+    private HashSet<string> selRevCgs = new();
+    private bool isWorking;
+    private bool viewsBuilt;
+    private string? workError;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        config = await MappingSvc.LoadConfigAsync(ScenarioId);
+        config.ModelId = ScenarioId.ToString();
+
+        if (string.IsNullOrEmpty(config.SourceDatabase) && !string.IsNullOrEmpty(Db))
+            config.SourceDatabase = Db;
+        if (string.IsNullOrEmpty(config.SourceSchema))
+            config.SourceSchema = "PUBLIC";
+
+        selFacCols = new HashSet<string>(config.FacCostColumns);
+        selRevDom = new HashSet<string>(config.RevDomColumns);
+        selRevInt = new HashSet<string>(config.RevIntColumns);
+        selRevCgs = new HashSet<string>(config.RevCgsColumns);
+
+        feeAssignments = new Dictionary<string, string>();
+        foreach (var ft in config.FeeTypesDom) feeAssignments[ft] = "Dom";
+        foreach (var ft in config.FeeTypesInt) feeAssignments[ft] = "Int";
+        foreach (var ft in config.FeeTypesCgs) feeAssignments[ft] = "Cgs";
+
+        structurePreset = DeriveStructurePreset(config);
+
+        // If this scenario already has saved config, treat the structure as known
+        if (!string.IsNullOrEmpty(config.ConfigId))
+        {
+            structureConfident = true;
+            showStructurePicker = false;
+            structureNote = $"Saved: {StructureLabel(structurePreset)}";
+        }
+        else
+        {
+            // New scenario — structure unknown until a table is discovered/selected
+            structureNote = null;
+            structureConfident = false;
+            showStructurePicker = false;
+        }
+    }
+
+    private static string DeriveStructurePreset(ModelConfigDto cfg)
+    {
+        if (!cfg.IncludeGlJoin && cfg.CourseCodeCol == "CODE2") return "U2";
+        if (cfg.IncludeGlJoin && string.IsNullOrEmpty(cfg.UnitCodeCol)) return "GL2";
+        return "GL3";
+    }
+
+    private void SetStructurePreset(string preset)
+    {
+        structurePreset = preset;
+        switch (preset)
+        {
+            case "GL3":
+                config.CourseCodeCol = "CODE3";
+                config.UnitCodeCol = "CODE2";
+                if (string.IsNullOrWhiteSpace(config.UnitDimTable)) config.UnitDimTable = "PRODUCTS_OBJECTS";
+                config.IncludeGlJoin = true;
+                config.GlCodeCol = "CODE1";
+                break;
+            case "GL2":
+                config.CourseCodeCol = "CODE3";
+                config.UnitCodeCol = "";
+                config.IncludeGlJoin = true;
+                config.GlCodeCol = "CODE1";
+                break;
+            case "U2":
+                config.CourseCodeCol = "CODE2";
+                config.UnitCodeCol = "CODE1";
+                if (string.IsNullOrWhiteSpace(config.UnitDimTable)) config.UnitDimTable = "PRODUCTS_OBJECTS";
+                config.IncludeGlJoin = false;
+                config.GlCodeCol = "";
+                break;
+        }
+    }
+
+    private async Task GoNext()
+    {
+        workError = null;
+        if (step == 1) await Step1Next();
+        else if (step == 2) step++;
+        else if (step == 3) { SyncFeeTypes(); step++; }
+        else if (step == 4) { SyncColumns(); await SaveConfig(); }
+    }
+
+    private void GoBack()
+    {
+        workError = null;
+        if (step > 1) step--;
+    }
+
+    private async Task DiscoverTablesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(config.SourceDatabase)) return;
+        workError = null;
+        isWorking = true;
+        try
+        {
+            availableTables = await MappingSvc.GetAvailableTablesAsync(config.SourceDatabase, config.SourceSchema);
+            if (availableTables.Count > 0 && !availableTables.Contains(config.FactTable))
+                config.FactTable = availableTables.FirstOrDefault(t => t.StartsWith("FACT_", StringComparison.OrdinalIgnoreCase))
+                    ?? availableTables[0];
+
+            // Auto-detect structure for whichever table was selected
+            if (!string.IsNullOrWhiteSpace(config.FactTable))
+                await DetectStructureForCurrentTableAsync();
+        }
+        catch (Exception ex)
+        {
+            workError = $"Could not load tables: {ex.Message}";
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private async Task Step1Next()
+    {
+        if (string.IsNullOrWhiteSpace(config.SourceDatabase))
+        {
+            workError = "Source database name is required.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(config.FactTable))
+        {
+            workError = "Click Discover Tables and select a fact table before continuing.";
+            return;
+        }
+
+        isWorking = true;
+        try
+        {
+            availableModels = await MappingSvc.GetAvailableModelsAsync(config.SourceDatabase, config.SourceSchema, config.FactTable);
+            availablePeriods = await MappingSvc.GetAvailablePeriodsAsync(config.SourceDatabase, config.SourceSchema, config.FactTable);
+            availableFeeTypes = await MappingSvc.GetAvailableFeeTypesAsync(config.SourceDatabase, config.SourceSchema, config.FeeTypeTable, config.FeeTypeColumn);
+            availableColumns = await MappingSvc.GetAvailableFactColumnsAsync(config.SourceDatabase, config.SourceSchema, config.FactTable);
+
+            if (string.IsNullOrEmpty(config.ModelFilter) && availableModels.Count > 0)
+                config.ModelFilter = availableModels[0];
+            if (string.IsNullOrEmpty(config.PeriodFilter) && availablePeriods.Count > 0)
+                config.PeriodFilter = availablePeriods[0];
+
+            if (string.IsNullOrEmpty(config.TotalExpCol))
+                config.TotalExpCol = availableColumns.FirstOrDefault(c => c == "EXP") ?? availableColumns.FirstOrDefault() ?? "EXP";
+            if (string.IsNullOrEmpty(config.DeliveryHoursCol))
+                config.DeliveryHoursCol = availableColumns.FirstOrDefault(c => c == "SUPPLIED_AC_HOURS") ?? availableColumns.FirstOrDefault() ?? "SUPPLIED_AC_HOURS";
+
+            foreach (var ft in availableFeeTypes)
+                feeAssignments.TryAdd(ft, "None");
+
+            step++;
+        }
+        catch (Exception ex)
+        {
+            workError = $"Connection failed: {ex.Message}";
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private void SyncFeeTypes()
+    {
+        config.FeeTypesDom = feeAssignments.Where(kv => kv.Value == "Dom").Select(kv => kv.Key).ToList();
+        config.FeeTypesInt = feeAssignments.Where(kv => kv.Value == "Int").Select(kv => kv.Key).ToList();
+        config.FeeTypesCgs = feeAssignments.Where(kv => kv.Value == "Cgs").Select(kv => kv.Key).ToList();
+    }
+
+    private void SyncColumns()
+    {
+        config.FacCostColumns = selFacCols.ToList();
+        config.RevDomColumns = selRevDom.ToList();
+        config.RevIntColumns = selRevInt.ToList();
+        config.RevCgsColumns = selRevCgs.ToList();
+    }
+
+    private async Task SaveConfig()
+    {
+        isWorking = true;
+        try
+        {
+            var tenantIdStr = Config["App:TenantId"] ?? "";
+            Guid.TryParse(tenantIdStr, out var tenantId);
+            await MappingSvc.SaveConfigAsync(config, tenantId);
+            step++;
+        }
+        catch (Exception ex)
+        {
+            workError = $"Failed to save mapping: {ex.Message}";
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private async Task BuildViews()
+    {
+        isWorking = true;
+        workError = null;
+        try
+        {
+            var error = await MappingSvc.CreateOrReplaceViewsAsync(config);
+            if (string.IsNullOrEmpty(error))
+                viewsBuilt = true;
+            else
+                workError = error;
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private async Task OnFactTableChangedAsync(ChangeEventArgs e)
+    {
+        config.FactTable = e.Value?.ToString() ?? config.FactTable;
+        await DetectStructureForCurrentTableAsync();
+    }
+
+    private async Task DetectStructureForCurrentTableAsync()
+    {
+        if (string.IsNullOrWhiteSpace(config.SourceDatabase) ||
+            string.IsNullOrWhiteSpace(config.FactTable)) return;
+
+        isDetectingStructure = true;
+        structureNote = null;
+        StateHasChanged();
+        try
+        {
+            var (preset, confident, reason) = await MappingSvc.DetectStructureAsync(
+                config.SourceDatabase, config.SourceSchema, config.FactTable);
+
+            structureNote = reason;
+            structureConfident = confident;
+            showStructurePicker = !confident;
+
+            if (confident)
+                SetStructurePreset(preset);
+        }
+        catch (Exception ex)
+        {
+            structureNote = $"Detection error: {ex.Message}";
+            structureConfident = false;
+            showStructurePicker = true;
+        }
+        finally
+        {
+            isDetectingStructure = false;
+        }
+    }
+
+    private static string StructureLabel(string preset) => preset switch
+    {
+        "GL2" => "GL → Courses (direct)",
+        "U2"  => "Units → Courses",
+        _     => "GL → Units → Courses"
+    };
+
+    private async Task RetryFeeTypesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(config.FeeTypeTable) || string.IsNullOrWhiteSpace(config.FeeTypeColumn))
+        {
+            workError = "Enter both a fee type table and column name.";
+            return;
+        }
+        workError = null;
+        isWorking = true;
+        try
+        {
+            availableFeeTypes = await MappingSvc.GetAvailableFeeTypesAsync(
+                config.SourceDatabase, config.SourceSchema, config.FeeTypeTable, config.FeeTypeColumn);
+            foreach (var ft in availableFeeTypes)
+                feeAssignments.TryAdd(ft, "None");
+            if (availableFeeTypes.Count == 0)
+                workError = $"Still no results from {config.FeeTypeTable}.{config.FeeTypeColumn} — check the names and try again.";
+        }
+        catch (Exception ex)
+        {
+            workError = $"Could not load fee types: {ex.Message}";
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+
+    private void SetFeeType(string ft, string category) => feeAssignments[ft] = category;
+
+    private static void ToggleSet(HashSet<string> set, string item, bool add)
+    {
+        if (add) set.Add(item);
+        else set.Remove(item);
+    }
+
+    private static string TruncateSql(string sql, int maxLen)
+        => sql.Length <= maxLen ? sql : sql[..maxLen] + "\n… (truncated)";
+}
