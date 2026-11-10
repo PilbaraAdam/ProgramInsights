@@ -140,6 +140,89 @@ window.chartHelpers = (function () {
             });
         },
 
+        // CVP (Cost-Volume-Profit) breakeven chart.
+        // chartPoints: array of { eftsl, revenue, totalCost }
+        // projectedEftsl: where the program currently sits (draws a marker)
+        renderBreakeven: function (canvasId, chartPoints, projectedEftsl) {
+            destroy(canvasId);
+            const ctx = document.getElementById(canvasId);
+            if (!ctx) return;
+
+            const revenueData = chartPoints.map(p => ({ x: p.eftsl, y: p.revenue }));
+            const costData    = chartPoints.map(p => ({ x: p.eftsl, y: p.totalCost }));
+
+            // Find the y value on the revenue line closest to projectedEftsl for the marker
+            const closest = chartPoints.reduce((best, p) =>
+                Math.abs(p.eftsl - projectedEftsl) < Math.abs(best.eftsl - projectedEftsl) ? p : best,
+                chartPoints[0]);
+
+            registry[canvasId] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Revenue',
+                            data: revenueData,
+                            borderColor: '#22c55e',
+                            backgroundColor: '#22c55e15',
+                            borderWidth: 2.5,
+                            pointRadius: 0,
+                            tension: 0,
+                            fill: false,
+                            order: 2
+                        },
+                        {
+                            label: 'Total Cost',
+                            data: costData,
+                            borderColor: '#ef4444',
+                            backgroundColor: '#ef444415',
+                            borderWidth: 2.5,
+                            pointRadius: 0,
+                            tension: 0,
+                            fill: false,
+                            order: 2
+                        },
+                        {
+                            label: 'Current projection',
+                            data: closest ? [{ x: closest.eftsl, y: closest.revenue }] : [],
+                            type: 'scatter',
+                            backgroundColor: '#3b82f6',
+                            borderColor: '#fff',
+                            borderWidth: 2,
+                            pointRadius: 8,
+                            pointStyle: 'circle',
+                            order: 1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top' },
+                        tooltip: {
+                            callbacks: {
+                                label: c => ` ${c.dataset.label}: ${AUD.format(c.parsed.y)}`
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: { display: true, text: 'EFTSL', color: '#64748b', font: { size: 11 } },
+                            grid: { display: false },
+                            ticks: { callback: v => NUM.format(v) }
+                        },
+                        y: {
+                            title: { display: true, text: 'Amount ($)', color: '#64748b', font: { size: 11 } },
+                            ticks: { callback: v => AUD.format(v) }
+                        }
+                    }
+                }
+            });
+        },
+
         destroy
     };
 })();

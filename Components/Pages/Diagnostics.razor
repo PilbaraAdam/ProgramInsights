@@ -1,0 +1,330 @@
+@page "/diagnostics"
+@rendermode InteractiveServer
+@using System.Security.Claims
+@using ProgramInsights.Services.Auth
+@using ProgramInsights.Services.Connections
+@using ProgramInsights.Services.Tenancy
+@using Snowflake.Data.Client
+@inject ITenantContext TenantCtx
+@inject ISnowflakeConnectionFactory Db
+@inject ISnowflakeTokenProvider Tokens
+@inject SnowflakeSessionOpener Opener
+@inject AuthenticationStateProvider AuthState
+
+@*
+    Verification page for the SSO / per-client-database wiring. It answers, in one
+    place, the questions that are otherwise guesswork: who does Snowflake think I am,
+    which role did it pick, which database did that route me to, and which optional
+    datasets can I reach.
+
+    Delete once the migration is proven, or gate it behind an admin policy.
+*@
+
+<PageTitle>Diagnostics — Program Insights</PageTitle>
+
+<div class="content-container">
+    <div class="wizard-header">
+        <h1 class="wizard-title">Connection Diagnostics</h1>
+        <p class="wizard-subtitle">Verifies Entra sign-in, Snowflake identity, and client-database routing.</p>
+    </div>
+
+    <div class="details-card">
+        <div class="details-card-title"><i class="fa-solid fa-id-badge"></i> Entra identity</div>
+        @if (claims is null)
+        {
+            <p class="no-data-hint">Loading…</p>
+        }
+        else
+        {
+            <table class="table">
+                <tbody>
+                    @foreach (var (label, value) in claims)
+                    {
+                        <tr><td style="width:220px;font-weight:600;">@label</td><td>@value</td></tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="details-card">
+        <div class="details-card-title"><i class="fa-solid fa-key"></i> Snowflake handshake</div>
+        <p class="wizard-hint">
+            Connects with <strong>no database specified</strong>, which isolates the OAuth
+            handshake from any missing-object problem. If this succeeds but tenant
+            resolution below fails, the control-plane database is the issue — not authentication.
+        </p>
+        <button type="button" class="button2" @onclick="RunHandshakeCheckAsync" disabled="@isProbing">
+            @if (isProbing)
+            {
+                <i class="fa-solid fa-spinner fa-spin"></i> <span>Connecting…</span>
+            }
+            else
+            {
+                <i class="fa-solid fa-plug"></i> <span>Test handshake</span>
+            }
+        </button>
+
+        @if (handshakeError is not null)
+        {
+            <div class="mapping-error" style="margin-top:12px;white-space:pre-wrap;">@handshakeError</div>
+        }
+        else if (handshakeInfo is not null)
+        {
+            <table class="table" style="margin-top:12px;">
+                <tbody>
+                    @foreach (var (label, value) in handshakeInfo)
+                    {
+                        <tr><td style="width:220px;font-weight:600;">@label</td><td>@value</td></tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="details-card">
+        <div class="details-card-title"><i class="fa-solid fa-database"></i> Tenant resolution</div>
+        @if (isLoading)
+        {
+            <p class="no-data-hint"><i class="fa-solid fa-spinner fa-spin"></i> Resolving…</p>
+        }
+        else if (error is not null)
+        {
+            <div class="mapping-error" style="white-space:pre-wrap;">@error</div>
+        }
+        else if (resolution is not null)
+        {
+            <table class="table">
+                <tbody>
+                    <tr><td style="width:220px;font-weight:600;">Status</td>
+                        <td>@(resolution.Ok ? "OK" : $"DENIED — {resolution.Reason}")</td></tr>
+                    <tr><td style="font-weight:600;">Snowflake role</td><td>@(resolution.Role ?? "—")</td></tr>
+                    <tr><td style="font-weight:600;">Client database</td><td>@(resolution.DatabaseName ?? "—")</td></tr>
+                    <tr><td style="font-weight:600;">Client name</td><td>@(resolution.ClientName ?? "—")</td></tr>
+                    <tr><td style="font-weight:600;">Tenant id</td><td>@resolution.TenantId</td></tr>
+                    <tr><td style="font-weight:600;">Benchmarks</td><td>@Yn(resolution.Capabilities.Benchmarks)</td></tr>
+                    <tr><td style="font-weight:600;">HELP allocations</td><td>@Yn(resolution.Capabilities.HelpAllocations)</td></tr>
+                    <tr><td style="font-weight:600;">Cortex</td><td>@Yn(resolution.Capabilities.Cortex)</td></tr>
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="details-card">
+        <div class="details-card-title"><i class="fa-solid fa-plug-circle-check"></i> Live session check</div>
+        <p class="wizard-hint">
+            Opens a tenant-scoped connection and asks Snowflake what it actually sees.
+            CURRENT_DATABASE() must be the client database, not the control plane.
+        </p>
+        <button type="button" class="button2" @onclick="RunSessionCheckAsync" disabled="@isChecking">
+            @if (isChecking)
+            {
+                <i class="fa-solid fa-spinner fa-spin"></i> <span>Checking…</span>
+            }
+            else
+            {
+                <i class="fa-solid fa-play"></i> <span>Run check</span>
+            }
+        </button>
+
+        @if (checkError is not null)
+        {
+            <div class="mapping-error" style="margin-top:12px;white-space:pre-wrap;">@checkError</div>
+        }
+        else if (sessionInfo is not null)
+        {
+            <table class="table" style="margin-top:12px;">
+                <tbody>
+                    @foreach (var (label, value) in sessionInfo)
+                    {
+                        <tr><td style="width:220px;font-weight:600;">@label</td><td>@value</td></tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="tab-footer-actions">
+        <button type="button" class="button2" @onclick="InvalidateAsync">
+            <i class="fa-solid fa-rotate"></i> Reload entitlements
+        </button>
+    </div>
+</div>
+
+@code {
+    private List<(string Label, string Value)>? claims;
+    private List<(string Label, string Value)>? sessionInfo;
+    private List<(string Label, string Value)>? handshakeInfo;
+    private TenantResolution? resolution;
+    private string? error;
+    private string? checkError;
+    private string? handshakeError;
+    private bool isLoading = true;
+    private bool isChecking;
+    private bool isProbing;
+
+    private static string Yn(bool value) => value ? "Yes" : "No";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        error = null;
+        try
+        {
+            var state = await AuthState.GetAuthenticationStateAsync();
+            var user = state.User;
+            // ASP.NET Core's OIDC handler remaps several short JWT claim names to long
+            // WS-Fed URIs, so look for both forms or these read as missing when they exist.
+            string Claim(params string[] names)
+            {
+                foreach (var n in names)
+                {
+                    var v = user.FindFirst(n)?.Value;
+                    if (!string.IsNullOrWhiteSpace(v)) return v;
+                }
+                return "—";
+            }
+
+            claims = new()
+            {
+                ("Authenticated", Yn(user.Identity?.IsAuthenticated == true)),
+                ("Name", Claim("name", ClaimTypes.Name)),
+                ("preferred_username", Claim("preferred_username")),
+                ("UPN", Claim(ClaimTypes.Upn, "upn")),
+                ("Email", Claim(ClaimTypes.Email, "email")),
+                ("Object id (oid)", Claim("oid", "http://schemas.microsoft.com/identity/claims/objectidentifier")),
+                ("Entra tenant (tid)", Claim("tid", "http://schemas.microsoft.com/identity/claims/tenantid")),
+                ("Principal used for Snowflake", Claim("preferred_username", ClaimTypes.Upn, "upn", ClaimTypes.Email)),
+            };
+
+            resolution = await TenantCtx.GetAsync();
+        }
+        catch (SnowflakeAuthExpiredException ex)
+        {
+            error = $"Sign-in expired: {ex.Message}";
+        }
+        catch (SnowflakeAccessDeniedException ex)
+        {
+            error = $"Access denied: {ex.Reason}";
+        }
+        catch (Exception ex)
+        {
+            error = Describe(ex);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RunHandshakeCheckAsync()
+    {
+        isProbing = true;
+        handshakeError = null;
+        handshakeInfo = null;
+        try
+        {
+            var cred = await Tokens.GetAsync();
+
+            // No database, no schema — pure authentication test.
+            await using var conn = await Opener.OpenAsync(cred, null, null);
+
+            var rows = new List<(string, string)>
+            {
+                ("Principal sent as user=", cred.Principal),
+                ("Access token length", cred.AccessToken.Length.ToString() + " chars"),
+            };
+            foreach (var (label, sql) in new[]
+            {
+                ("CURRENT_USER()", "SELECT CURRENT_USER()"),
+                ("CURRENT_ROLE()", "SELECT CURRENT_ROLE()"),
+                ("CURRENT_WAREHOUSE()", "SELECT CURRENT_WAREHOUSE()"),
+                ("CURRENT_ACCOUNT()", "SELECT CURRENT_ACCOUNT()"),
+            })
+            {
+                await using var cmd = new SnowflakeDbCommand(conn) { CommandText = sql };
+                var value = await cmd.ExecuteScalarAsync();
+                rows.Add((label, value?.ToString() ?? "(null)"));
+            }
+            handshakeInfo = rows;
+        }
+        catch (Exception ex)
+        {
+            handshakeError = Describe(ex);
+        }
+        finally
+        {
+            isProbing = false;
+        }
+    }
+
+    // The Snowflake driver wraps the real cause, so unwrap the whole chain — the outer
+    // "Unable to connect" on its own is not actionable.
+    private static string Describe(Exception ex)
+    {
+        var sb = new System.Text.StringBuilder();
+        var current = ex;
+        var depth = 0;
+        while (current is not null && depth < 6)
+        {
+            sb.AppendLine($"{new string(' ', depth * 2)}{current.GetType().Name}: {current.Message}");
+            if (current is SnowflakeDbException sf)
+                sb.AppendLine($"{new string(' ', depth * 2)}  ErrorCode={sf.ErrorCode} SqlState={sf.SqlState} QueryId={sf.QueryId}");
+            current = current.InnerException;
+            depth++;
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private async Task RunSessionCheckAsync()
+    {
+        isChecking = true;
+        checkError = null;
+        sessionInfo = null;
+        try
+        {
+            await using var conn = await Db.OpenAsync(SnowflakeScope.Tenant);
+
+            var rows = new List<(string, string)>();
+            foreach (var (label, sql) in new[]
+            {
+                ("CURRENT_USER()", "SELECT CURRENT_USER()"),
+                ("CURRENT_ROLE()", "SELECT CURRENT_ROLE()"),
+                ("CURRENT_DATABASE()", "SELECT CURRENT_DATABASE()"),
+                ("CURRENT_SCHEMA()", "SELECT CURRENT_SCHEMA()"),
+                ("CURRENT_WAREHOUSE()", "SELECT CURRENT_WAREHOUSE()"),
+            })
+            {
+                await using var cmd = new SnowflakeDbCommand(conn) { CommandText = sql };
+                var value = await cmd.ExecuteScalarAsync();
+                rows.Add((label, value?.ToString() ?? "(null)"));
+            }
+            sessionInfo = rows;
+        }
+        catch (SnowflakeAuthExpiredException ex)
+        {
+            checkError = $"Sign-in expired: {ex.Message}";
+        }
+        catch (SnowflakeAccessDeniedException ex)
+        {
+            checkError = $"Access denied: {ex.Reason}";
+        }
+        catch (Exception ex)
+        {
+            checkError = Describe(ex);
+        }
+        finally
+        {
+            isChecking = false;
+        }
+    }
+
+    private async Task InvalidateAsync()
+    {
+        await TenantCtx.InvalidateAsync();
+        sessionInfo = null;
+        await LoadAsync();
+    }
+}

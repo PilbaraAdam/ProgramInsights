@@ -1,0 +1,52 @@
+@using System.Security.Claims
+
+<div class="dropdown">
+    <a class="app-nav-icon-link" href="#" data-bs-toggle="dropdown" title="My Profile">
+        <i class="fa-regular fa-circle-user"></i>
+    </a>
+    <ul class="dropdown-menu dropdown-menu-end app-dropdown">
+        <AuthorizeView>
+            <Authorized>
+                <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user me-2"></i>@DisplayName(context.User)</a></li>
+            </Authorized>
+            <NotAuthorized>
+                <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user me-2"></i>Not signed in</a></li>
+            </NotAuthorized>
+        </AuthorizeView>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="/about"><i class="fa-solid fa-circle-info me-2"></i>About</a></li>
+        <li><a class="dropdown-item" href="/privacy"><i class="fa-solid fa-shield-halved me-2"></i>Privacy policy</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <AuthorizeView>
+            <Authorized>
+                @* Plain href, not @onclick: sign-out must be a real navigation to the
+                   OIDC endpoint so the auth cookie is cleared outside the circuit. *@
+                <li>
+                    <a class="dropdown-item" href="MicrosoftIdentity/Account/SignOut" style="color:#ef4444;">
+                        <i class="fa-solid fa-right-from-bracket me-2"></i>Log Out
+                    </a>
+                </li>
+            </Authorized>
+            <NotAuthorized>
+                <li>
+                    <a class="dropdown-item" href="MicrosoftIdentity/Account/SignIn">
+                        <i class="fa-solid fa-right-to-bracket me-2"></i>Sign In
+                    </a>
+                </li>
+            </NotAuthorized>
+        </AuthorizeView>
+    </ul>
+</div>
+
+@code {
+    // Prefer the human-readable name, fall back through the identifiers the Entra
+    // token actually carries. Mirrors the principal resolution order used for the
+    // Snowflake connection so support sees the same value the database sees.
+    private static string DisplayName(ClaimsPrincipal user) =>
+        user.FindFirst("name")?.Value
+        ?? user.FindFirst("preferred_username")?.Value
+        ?? user.FindFirst(ClaimTypes.Upn)?.Value
+        ?? user.FindFirst(ClaimTypes.Email)?.Value
+        ?? user.Identity?.Name
+        ?? "Unknown user";
+}

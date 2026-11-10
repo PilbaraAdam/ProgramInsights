@@ -33,4 +33,6 @@ public class ModelConfigDto
     public bool IncludeGlJoin { get; set; } = true;
     /// <summary>Which CODE column joins to GL_OBJECTS (only used when IncludeGlJoin is true).</summary>
     public string GlCodeCol { get; set; } = "CODE1";
+    /// <summary>Column in the unit dimension table that holds the detailed FOE code.</summary>
+    public string FoeCodeCol { get; set; } = "";
 }

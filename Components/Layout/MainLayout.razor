@@ -24,19 +24,7 @@
                     <li><a class="dropdown-item" href="/constants"><i class="fa-solid fa-sliders me-2"></i>Constants</a></li>
                 </ul>
             </div>
-            <div class="dropdown">
-                <a class="app-nav-icon-link" href="#" data-bs-toggle="dropdown" title="My Profile">
-                    <i class="fa-regular fa-circle-user"></i>
-                </a>
-                <ul class="dropdown-menu dropdown-menu-end app-dropdown">
-                    <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user me-2"></i>@UserName</a></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item" href="/about"><i class="fa-solid fa-circle-info me-2"></i>About</a></li>
-                    <li><a class="dropdown-item" href="/privacy"><i class="fa-solid fa-shield-halved me-2"></i>Privacy policy</a></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item" href="#" style="color:#ef4444;"><i class="fa-solid fa-right-from-bracket me-2"></i>Log Out</a></li>
-                </ul>
-            </div>
+            <UserMenu />
         </div>
     </div>
 </nav>
@@ -48,7 +36,3 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
-
-@code {
-    private string UserName => "User";
-}

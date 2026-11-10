@@ -1,26 +1,26 @@
 using ProgramInsights.Models;
+using ProgramInsights.Services.Connections;
 using Snowflake.Data.Client;
 
 namespace ProgramInsights.Services;
 
 public class ScenarioService
 {
-    private readonly string _connStr;
+    private readonly ISnowflakeConnectionFactory _db;
+    private readonly ILogger<ScenarioService> _log;
 
-    public ScenarioService(IConfiguration config)
+    public ScenarioService(ISnowflakeConnectionFactory db, ILogger<ScenarioService> log)
     {
-        _connStr = config.GetConnectionString("Snowflake") ?? "";
+        _db = db;
+        _log = log;
     }
 
-    public bool IsConfigured => !string.IsNullOrEmpty(_connStr);
-
-    public async Task<List<ScenarioDto>> GetAllAsync(Guid tenantId)
+    public async Task<List<ScenarioDto>> GetAllAsync(Guid tenantId, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             var result = new List<ScenarioDto>();
-            if (!IsConfigured) return result;
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using var cmd = SnowflakeDb.CreateCommand(@"
                 SELECT m.MODEL_ID, m.NAME, COALESCE(m.ACE_DBNAME, '') AS ACE_DBNAME,
                        COUNT(DISTINCT p.PROGRAM_ID) AS PROGRAM_COUNT,
@@ -41,15 +41,15 @@ public class ScenarioService
                     Convert.ToInt32(row["PROGRAM_COUNT"]),
                     Convert.ToInt32(row["HAS_MAPPING_CONFIG"]) == 1));
             return result;
-        });
+        }, ct);
     }
 
-    public async Task<Guid> CreateAsync(Guid tenantId, string name, string sourceDb)
+    public async Task<Guid> CreateAsync(Guid tenantId, string name, string sourceDb, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             var modelId = Guid.NewGuid();
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using (var cmd = SnowflakeDb.CreateCommand(
                 "INSERT INTO MODEL (TENANT, MODEL_ID, NAME, ACE_MODEL, ACE_DBNAME) VALUES (:Tenant, :Model_ID, :Name, '', :Ace_DBName)", conn))
             {
@@ -61,28 +61,28 @@ public class ScenarioService
             }
             SeedDefaultProfiles(conn, modelId);
             return modelId;
-        });
+        }, ct);
     }
 
-    public async Task UpdateAsync(Guid modelId, string name, string sourceDb)
+    public async Task UpdateAsync(Guid modelId, string name, string sourceDb, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using var cmd = SnowflakeDb.CreateCommand(
                 "UPDATE MODEL SET NAME = :Name, ACE_DBNAME = :Ace_DBName, SAVE_DATE = CURRENT_TIMESTAMP() WHERE MODEL_ID = :Model_ID", conn);
             SnowflakeDb.AddParam(cmd, "Name", name);
             SnowflakeDb.AddParam(cmd, "Ace_DBName", sourceDb);
             SnowflakeDb.AddParam(cmd, "Model_ID", modelId.ToString());
             cmd.ExecuteNonQuery();
-        });
+        }, ct);
     }
 
-    public async Task DeleteAsync(Guid tenantId, Guid modelId)
+    public async Task DeleteAsync(Guid tenantId, Guid modelId, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             var programIds = new List<string>();
             using (var cmd = SnowflakeDb.CreateCommand("SELECT PROGRAM_ID FROM PROGRAM WHERE MODEL_ID = :Model", conn))
             {
@@ -103,7 +103,7 @@ public class ScenarioService
             var safeId = modelId.ToString().Replace("-", "_");
             ExecuteRaw(conn, $"DROP VIEW IF EXISTS V_COURSE_VALUES_{safeId}");
             ExecuteRaw(conn, $"DROP VIEW IF EXISTS V_UNIT_VALUES_{safeId}");
-        });
+        }, ct);
     }
 
     private static void Execute(SnowflakeDbConnection conn, string sql, params (string Name, object Value)[] parameters)

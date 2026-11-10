@@ -1,0 +1,14 @@
+@inject NavigationManager Nav
+
+@code {
+    // forceLoad is mandatory: the OIDC challenge is an HTTP 302 and cannot be
+    // performed from inside the SignalR circuit. A normal NavigateTo would try to
+    // route client-side and silently do nothing useful.
+    protected override void OnInitialized()
+    {
+        var returnUrl = Uri.EscapeDataString(Nav.Uri);
+        Nav.NavigateTo(
+            $"MicrosoftIdentity/Account/SignIn?redirectUri={returnUrl}",
+            forceLoad: true);
+    }
+}

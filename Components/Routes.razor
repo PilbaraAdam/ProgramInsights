@@ -1,6 +1,18 @@
-﻿<Router AppAssembly="typeof(Program).Assembly">
+<Router AppAssembly="typeof(Program).Assembly">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <Authorizing>
+                <div class="content-container" style="padding:40px;">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Signing you in…
+                </div>
+            </Authorizing>
+            <NotAuthorized>
+                @* Endpoint-level RequireAuthorization already 302s unauthenticated page
+                   requests before a circuit starts. This only fires when the auth cookie
+                   expires while a circuit is already live. *@
+                <RedirectToLogin />
+            </NotAuthorized>
+        </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>

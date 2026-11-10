@@ -1,0 +1,2696 @@
+@page "/program/{ProgramId:guid}"
+@rendermode InteractiveServer
+@using ProgramInsights.Services.Tenancy
+
+<PageTitle>@(program?.Name ?? "Program") - Program Insights</PageTitle>
+
+@if (isLoading)
+{
+    <div class="loading-container">
+        <div class="loading-icon-wrap">
+            <i class="fa-solid fa-chart-bar"></i>
+        </div>
+        <div class="loading-spinner"></div>
+        <p class="loading-title">Loading Program</p>
+        <p class="loading-sub">Fetching data, please wait…</p>
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(loadError))
+{
+    <div class="content-container">
+        <ul class="breadcrumb">
+            <li><a href="/">Home</a></li>
+            <li>Program</li>
+        </ul>
+        <div class="mapping-error">@loadError</div>
+    </div>
+}
+else if (program is not null)
+{
+    <div class="content-container">
+        <ul class="breadcrumb">
+            <li><a href="/">Home</a></li>
+            <li><a href="/">@program.ScenarioName</a></li>
+            <li>@program.Name</li>
+        </ul>
+        @if (!string.IsNullOrWhiteSpace(statusMessage))
+        {
+            <span class="message-label">@statusMessage</span>
+        }
+        @if (!string.IsNullOrWhiteSpace(saveError))
+        {
+            <div class="mapping-error">@saveError</div>
+        }
+    </div>
+
+    <div class="tabOuterContainer">
+        <div class="tabContainer">
+            <div class="tab">
+                <div class="tab-content">
+                    <div class="programDetails">
+                        @if (activeTab != tabs[^1])
+                        {
+                            <button type="button" class="button2" @onclick="MoveToNextTab">
+                                Next <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        }
+                    </div>
+
+                    <div class="tabLeftSize">
+                        @foreach (var tab in tabs)
+                        {
+                            <button type="button" class="tablinks @(activeTab == tab ? "active" : "")"
+                                    @onclick="() => SetActiveTab(tab)">
+                                <i class="@TabIcon(tab)"></i> @TabLabel(tab)
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (activeTab == "Details")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="details-layout">
+
+                        @* ── LEFT: Program details + Scenario ── *@
+                        <div class="details-form-col">
+
+                            @* Card 1 — Program details *@
+                            <div class="details-card">
+                                <div class="details-card-title">
+                                    <i class="fa-solid fa-circle-info"></i> Program Details
+                                </div>
+
+                                @* Row 1: Name / Start Year / Profile *@
+                                <div class="dcf-row">
+                                    <div class="dcf-field dcf-field-grow">
+                                        <label class="dcf-label">Name</label>
+                                        <input type="text" class="textBoxStyle4" @bind="program.Name" maxlength="36" />
+                                    </div>
+                                    <div class="dcf-field dcf-field-sm">
+                                        <label class="dcf-label">Start Year</label>
+                                        <input type="number" class="textBoxStyle4" @bind="program.StartYear" />
+                                    </div>
+                                    @if (program.Profiles.Count > 0)
+                                    {
+                                        <div class="dcf-field dcf-field-sm">
+                                            <label class="dcf-label">Default Profile</label>
+                                            <select class="dropDownList1" @bind="program.Profile">
+                                                @foreach (var p in program.Profiles)
+                                                {
+                                                    <option value="@p.Name">@p.Name</option>
+                                                }
+                                            </select>
+                                        </div>
+                                    }
+                                </div>
+
+                                @* Row 2: Description *@
+                                <div class="dcf-row" style="margin-top:12px;">
+                                    <div class="dcf-field dcf-field-grow">
+                                        <label class="dcf-label">Description <span style="font-weight:400;color:#94a3b8;text-transform:none;letter-spacing:0;">(optional)</span></label>
+                                        <textarea class="textBoxStyle3" rows="3" @bind="program.Description" maxlength="250"
+                                                  placeholder="Add a brief program description…"></textarea>
+                                    </div>
+                                </div>
+
+                                @* Row 3: Owner / Status *@
+                                <div class="dcf-row" style="margin-top:12px;">
+                                    <div class="dcf-field dcf-field-grow">
+                                        <label class="dcf-label">Owner / Contact</label>
+                                        <input type="text" class="textBoxStyle4" @bind="program.Owner"
+                                               placeholder="e.g. Jane Smith" maxlength="100" />
+                                    </div>
+                                    <div class="dcf-field dcf-field-sm" style="flex:0 0 150px;">
+                                        <label class="dcf-label">Program Status</label>
+                                        <select class="dropDownList1" @bind="program.Status">
+                                            <option value="Active">Active</option>
+                                            <option value="Draft">Draft</option>
+                                            <option value="Under Review">Under Review</option>
+                                            <option value="Archived">Archived</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                @* Row 4: Tags *@
+                                <div style="margin-top:12px;">
+                                    <label class="dcf-label">Tags</label>
+                                    <div class="tag-pills" style="margin-top:6px;">
+                                        @foreach (var tag in ParsedTags)
+                                        {
+                                            var capturedTag = tag;
+                                            <span class="tag-pill">
+                                                @capturedTag
+                                                <button type="button" @onclick="() => RemoveTag(capturedTag)" title="Remove">×</button>
+                                            </span>
+                                        }
+                                        <div class="tag-add-row">
+                                            <input type="text" class="textBoxStyle4" style="width:160px;padding:4px 8px;font-size:12px;"
+                                                   placeholder="Add a tag…" @bind="newTagInput" @bind:event="oninput"
+                                                   @onkeydown="OnTagInputKeyDown" />
+                                            <button type="button" class="tag-add-btn" @onclick="AddTag">+ Add tag</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                @* Info row *@
+                                <div class="dcf-info-row" style="margin-top:14px;">
+                                    <i class="fa-solid fa-calendar-days"></i>
+                                    @program.Settings.Count projection year@(program.Settings.Count == 1 ? "" : "s")
+                                    &nbsp;·&nbsp; @program.StartYear – @(program.StartYear + program.Settings.Count - 1)
+                                </div>
+                            </div>
+
+                            @* Card 2 — Scenario *@
+                            <div class="details-card">
+                                <div class="details-card-title">
+                                    <i class="fa-solid fa-database"></i> Scenario
+                                </div>
+                                <div class="quickstat-row">
+                                    <span class="quickstat-label">Name</span>
+                                    <span class="quickstat-value">@program.ScenarioName</span>
+                                </div>
+                                <div class="quickstat-row">
+                                    <span class="quickstat-label">Source</span>
+                                    <span class="quickstat-value">
+                                        @if (!string.IsNullOrWhiteSpace(program.SourceDb))
+                                        {
+                                            <span class="scenario-sf-badge">
+                                                <i class="fa-solid fa-database"></i> @program.SourceDb
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="source-manual-tag">
+                                                <i class="fa-solid fa-file-pen"></i> Manual
+                                            </span>
+                                        }
+                                    </span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(program.InsightsModel))
+                                {
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Model</span>
+                                        <span class="quickstat-value" style="font-size:12px;">@program.InsightsModel</span>
+                                    </div>
+                                }
+                                @if (program.ScenarioSaveDate.HasValue)
+                                {
+                                    <div class="quickstat-row">
+                                        <span class="quickstat-label">Data updated</span>
+                                        <span class="quickstat-value" style="font-size:12px;">@FormatDate(program.ScenarioSaveDate)</span>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(program.SourceDb))
+                                {
+                                    var schoolCount = Schools.Count();
+                                    var courseCount = program.ModelValues.Select(v => v.CourseName).Distinct().Count();
+                                    var unitCount = program.UnitOptions.Count;
+                                    var projYears = program.Settings.Count;
+                                    <div class="scenario-stats-grid">
+                                        <div class="scenario-stat-tile">
+                                            <div class="scenario-stat-value">@courseCount</div>
+                                            <div class="scenario-stat-label">Courses</div>
+                                        </div>
+                                        <div class="scenario-stat-tile">
+                                            <div class="scenario-stat-value">@unitCount</div>
+                                            <div class="scenario-stat-label">Units</div>
+                                        </div>
+                                        @if (schoolCount > 0)
+                                        {
+                                            <div class="scenario-stat-tile">
+                                                <div class="scenario-stat-value">@schoolCount</div>
+                                                <div class="scenario-stat-label">Schools</div>
+                                            </div>
+                                        }
+                                        <div class="scenario-stat-tile">
+                                            <div class="scenario-stat-value">@projYears <span style="font-size:14px;font-weight:500;">yrs</span></div>
+                                            <div class="scenario-stat-label">Projection</div>
+                                        </div>
+                                    </div>
+                                    <a href="/scenario/@program.ScenarioId/mapping?db=@Uri.EscapeDataString(program.SourceDb)"
+                                       class="button2 mapping-link-btn" style="width:100%;justify-content:center;display:flex;">
+                                        <i class="fa-solid fa-diagram-project"></i> Edit data mapping
+                                    </a>
+                                }
+                            </div>
+
+                            <div class="tab-footer-actions">
+                                <button type="button" class="button2" @onclick="MoveToNextTab">
+                                    Next: Input Data <i class="fa-solid fa-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        @* ── RIGHT: workflow sidebar ── *@
+                        <div class="details-sidebar-col">
+
+                            @* Setup checklist *@
+                            @{
+                                var stepsComplete = SetupStepsComplete;
+                                var pct = (stepsComplete * 100) / 4;
+                            }
+                            <div class="details-checklist">
+                                <div class="details-checklist-title">Setup Checklist</div>
+                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                                    <span style="font-size:12px;color:#374151;">@stepsComplete of 4 steps complete</span>
+                                    <span style="font-size:12px;font-weight:700;color:@(pct == 100 ? "#16a34a" : "#d97706");">@pct%</span>
+                                </div>
+                                <div class="checklist-progress-bar">
+                                    <div class="checklist-progress-fill" style="width:@pct%;background:@(pct == 100 ? "#16a34a" : "#d97706");"></div>
+                                </div>
+
+                                @* Step: Input data *@
+                                <div class="checklist-v2-item">
+                                    <div class="checklist-v2-icon @(InputDataReady ? "ok" : "warn")">
+                                        <i class="@(InputDataReady ? "fa-solid fa-check" : "fa-solid fa-pen")"></i>
+                                    </div>
+                                    <div>
+                                        <div class="checklist-v2-title">Input data</div>
+                                        <div class="checklist-v2-desc">@(InputDataReady ? "EFTSL values entered" : "No EFTSL entered")</div>
+                                        @if (!InputDataReady)
+                                        {
+                                            <button type="button" class="checklist-v2-link" @onclick='() => SetActiveTab("InputData")'>Go to Input Data →</button>
+                                        }
+                                    </div>
+                                </div>
+
+                                @* Step: Units *@
+                                <div class="checklist-v2-item">
+                                    <div class="checklist-v2-icon @(UnitsReady ? "ok" : "warn")">
+                                        <i class="@(UnitsReady ? "fa-solid fa-check" : "fa-solid fa-pen")"></i>
+                                    </div>
+                                    <div>
+                                        <div class="checklist-v2-title">Units</div>
+                                        <div class="checklist-v2-desc">@(UnitsReady ? $"{program.Units.Count} unit{(program.Units.Count == 1 ? "" : "s")} configured" : "No units added")</div>
+                                        @if (!UnitsReady)
+                                        {
+                                            <button type="button" class="checklist-v2-link" @onclick='() => SetActiveTab("Units")'>Go to Units →</button>
+                                        }
+                                    </div>
+                                </div>
+
+                                @* Step: Cost & Revenue *@
+                                <div class="checklist-v2-item">
+                                    <div class="checklist-v2-icon @(CostRevenueReady ? "ok" : "warn")">
+                                        <i class="@(CostRevenueReady ? "fa-solid fa-check" : "fa-solid fa-pen")"></i>
+                                    </div>
+                                    <div>
+                                        <div class="checklist-v2-title">Cost & revenue</div>
+                                        <div class="checklist-v2-desc">@(CostRevenueReady ? "Values set" : "Missing CPH or NFC")</div>
+                                        @if (!CostRevenueReady)
+                                        {
+                                            <button type="button" class="checklist-v2-link" @onclick='() => SetActiveTab("CostRevenue")'>Go to Cost & Revenue →</button>
+                                        }
+                                    </div>
+                                </div>
+
+                                @* Step: Run calculation *@
+                                <div class="checklist-v2-item">
+                                    <div class="checklist-v2-icon @(calculationResult is not null && !calculationIsStale ? "ok" : "pending")">
+                                        <i class="@(calculationResult is not null && !calculationIsStale ? "fa-solid fa-check" : "fa-regular fa-circle")"></i>
+                                    </div>
+                                    <div>
+                                        <div class="checklist-v2-title">Run calculation</div>
+                                        <div class="checklist-v2-desc">
+                                            @if (calculationResult is not null && !calculationIsStale) { <span>Results available</span> }
+                                            else if (calculationIsStale) { <span>Results are stale</span> }
+                                            else { <span>Not yet run</span> }
+                                        </div>
+                                        @if (calculationResult is null || calculationIsStale)
+                                        {
+                                            <button type="button" class="checklist-v2-link" @onclick='() => SetActiveTab("Results")'>Go to Results →</button>
+                                        }
+                                    </div>
+                                </div>
+
+                            </div>
+
+                            @* Suggested next step *@
+                            @{
+                                var nextStep = GetSuggestedNextStep();
+                            }
+                            <div class="suggested-step-card">
+                                <div class="suggested-step-title">
+                                    <i class="fa-solid fa-circle-arrow-right"></i> Suggested next step
+                                </div>
+                                <p class="suggested-step-desc">@nextStep.Description</p>
+                                <button type="button" class="button1 suggested-step-btn"
+                                        @onclick="() => SetActiveTab(nextStep.TabTarget)">
+                                    <i class="fa-solid fa-play"></i> @nextStep.ButtonText
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "InputData")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                    <div class="tab-section-header">
+                        <h3 class="tab-section-title">Enrolment &amp; Cost Projections</h3>
+                        <p class="tab-section-desc">Enter commencing EFTSL, fixed costs, and CPI adjustments for each projection year.</p>
+                    </div>
+                    <div class="input-data-scroll-wrapper">
+                        <table class="input-data-table">
+                            <thead>
+                                <tr>
+                                    <th>Year</th>
+                                    @foreach (var setting in program.Settings)
+                                    {
+                                        <th>@(program.StartYear + setting.Year)</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @InputRow("CGS EFTSL", "enrolment-row", setting => setting.CgsEftsl, (setting, value) => setting.CgsEftsl = value)
+                                @InputRow("Domestic EFTSL", "enrolment-row", setting => setting.DomesticEftsl, (setting, value) => setting.DomesticEftsl = value)
+                                @InputRow("International EFTSL", "enrolment-row", setting => setting.InternationalEftsl, (setting, value) => setting.InternationalEftsl = value)
+                                @InputRow("Fixed Costs ($)", "cost-row group-start", setting => setting.FixedExpense, (setting, value) => setting.FixedExpense = value)
+                                @InputRow("Revenue CPI (%)", "cpi-row group-start", setting => setting.RevenueCpi, (setting, value) => setting.RevenueCpi = value)
+                                @InputRow("Expense CPI (%)", "cpi-row", setting => setting.ExpenseCpi, (setting, value) => setting.ExpenseCpi = value)
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="tab-footer-actions" style="margin-top:16px;">
+                        <button type="button" class="button2" @onclick="AddProjectionYear">+ Add Year</button>
+                        <button type="button" class="button2" @onclick="RemoveProjectionYear" disabled="@(program.Settings.Count <= 1)">- Remove Year</button>
+                        <span style="flex:1;"></span>
+                        <button type="button" class="button2" @onclick="MoveToNextTab">
+                            Next: Units <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+                    </div> @* end fixedTableWidth *@
+                </div>
+            }
+
+            @if (activeTab == "Units")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Units &amp; Profiles</h3>
+                            <p class="tab-section-desc">Assign units and teaching profiles for each year of the degree. All listed units are treated as core — every student attends every unit.</p>
+                        </div>
+
+                        <div id="degreeYearsContainer">
+                            @for (var year = 1; year <= DegreeYearCount; year++)
+                            {
+                                var capturedYear = year;
+                                var unitsForYear = program.Units.Where(u => u.ProgramYear == capturedYear).ToList();
+                                <div class="degree-year-section">
+                                    <div class="degree-year-header">
+                                        <span class="dy-header-left">
+                                            <i class="fa-solid fa-calendar-days"></i>
+                                            <span class="dy-year-label">Year @capturedYear</span>
+                                            <span class="dy-unit-count">@unitsForYear.Count @(unitsForYear.Count == 1 ? "unit" : "units")</span>
+                                        </span>
+                                    </div>
+                                    <div class="degree-year-body">
+                                        <table class="profiles-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Unit</th>
+                                                    <th>Profile</th>
+                                                    <th></th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @if (unitsForYear.Count == 0)
+                                                {
+                                                    <tr class="no-units-row">
+                                                        <td colspan="3" class="no-units-msg">No units yet.</td>
+                                                    </tr>
+                                                }
+                                                @foreach (var unit in unitsForYear)
+                                                {
+                                                    <tr>
+                                                        <td class="unit-name-cell">
+                                                            @if (!program.UnitOptions.Any(o => o.Name == unit.Unit))
+                                                            {
+                                                                <span class="new-unit-pill">New</span>
+                                                            }
+                                                            @unit.Unit
+                                                        </td>
+                                                        <td class="profile-name-cell">
+                                                            @unit.Profile
+                                                        </td>
+                                                        <td class="action-cell">
+                                                            <button type="button" class="row-action-btn"
+                                                                    title="Edit" @onclick="() => OpenUnitPicker(capturedYear, unit)">
+                                                                <i class="fa-solid fa-pen"></i>
+                                                            </button>
+                                                            <button type="button" class="row-action-btn row-action-remove"
+                                                                    title="Remove" @onclick="() => RemoveUnit(unit)">
+                                                                <i class="fa-solid fa-trash"></i>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                        <div class="dy-footer">
+                                            <button type="button" class="button4" @onclick="() => OpenUnitPicker(capturedYear)">
+                                                <i class="fa-solid fa-plus"></i> Add Unit
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="tab-footer-actions" style="margin-top:16px;">
+                            <button type="button" class="button2" @onclick="AddDegreeYear">
+                                <i class="fa-solid fa-plus"></i> Add Degree Year
+                            </button>
+                            <button type="button" class="button2" @onclick="RemoveDegreeYear" disabled="@(DegreeYearCount <= 1)">
+                                <i class="fa-solid fa-trash"></i> Remove Last Year
+                            </button>
+                            <span style="flex:1;"></span>
+                            <button type="button" class="button2" @onclick="MoveToNextTab">
+                                Next: Cost & Revenue <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "CostRevenue")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Cost &amp; Revenue</h3>
+                            <p class="tab-section-desc">Set the faculty cost per hour, non-faculty cost, and revenue rates per EFTSL. Use model values from Snowflake data or enter custom figures.</p>
+                        </div>
+                        <div class="cr-layout @(HasSnowflakeSource ? "" : "cr-layout-manual")">
+
+                            @* Model reference table at the top — Snowflake scenarios only *@
+                            @if (HasSnowflakeSource)
+                            {
+                                <div class="cr-model-panel">
+                                    <p class="cr-panel-title">Model Reference Data</p>
+                                    <p style="font-size:12px;color:#64748b;margin:0 0 10px;">Click a row to copy its values into the settings below.</p>
+                                    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                                        <select class="dropDownList1" @bind="program.SchoolSelect">
+                                            <option value="">All Schools</option>
+                                            @foreach (var school in Schools)
+                                            {
+                                                <option value="@school">@school</option>
+                                            }
+                                        </select>
+                                        <select class="dropDownList1" @bind="program.CourseSelect">
+                                            <option value="">All Courses</option>
+                                            @foreach (var course in Courses)
+                                            {
+                                                <option value="@course">@course</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <table class="tableStyle2 cr-model-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Career</th>
+                                                <th>CPH</th>
+                                                <th>NFC / EFTSL</th>
+                                                <th>Rev Dom</th>
+                                                <th>Rev Int</th>
+                                                <th>Rev CGS</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @if (!ModelValueSummaries.Any())
+                                            {
+                                                <tr><td colspan="6" style="color:#94a3b8;font-size:12px;text-align:center;padding:16px;">No model data available.</td></tr>
+                                            }
+                                            @foreach (var value in ModelValueSummaries)
+                                            {
+                                                <tr class="selectable-row @(program.CareerSelect == value.Career ? "scenario-selected" : "")"
+                                                    @onclick="() => SelectModelValue(value)">
+                                                    <td><span class="custom-link">@value.Career</span></td>
+                                                    <td>@FormatNumber(value.CostPerHour)</td>
+                                                    <td>@FormatNumber(value.NonCostPerEftsl)</td>
+                                                    <td>@FormatNumber(value.RevDomPerEftsl)</td>
+                                                    <td>@FormatNumber(value.RevIntPerEftsl)</td>
+                                                    <td>@FormatNumber(value.RevCgsPerEftsl)</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+
+                            <!-- Editor cards below — Revenue row then Cost row -->
+                            <div class="cr-editor-panel">
+                                <div class="cr-section">
+                                    <div class="cr-section-header">
+                                        <i class="fa-solid fa-arrow-trend-up"></i> Revenue
+                                    </div>
+                                    <div class="cr-cards-row">
+                                        @CrEditorCard("CGS Revenue / EFTSL", "RevCgs")
+                                        @CrEditorCard("Domestic Revenue / EFTSL", "RevDom")
+                                        @CrEditorCard("International Revenue / EFTSL", "RevInt")
+                                    </div>
+                                </div>
+                                <div class="cr-section">
+                                    <div class="cr-section-header">
+                                        <i class="fa-solid fa-arrow-trend-down"></i> Cost
+                                    </div>
+                                    <div class="cr-cards-row cr-cards-row-2">
+                                        @CrEditorCard("Faculty Cost / Hour", "Cph")
+                                        @CrEditorCard("Non-Faculty Cost / EFTSL", "Nfc")
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+
+                        <div class="tab-footer-actions" style="margin-top:20px;">
+                            <button type="button" class="button2" @onclick="MoveToNextTab">
+                                Next: Calculate <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Results")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Results</h3>
+                            <p class="tab-section-desc">Year-by-year projection of EFTSL ramp-up, teaching hours, revenue, cost, and margin across all cohorts.</p>
+                        </div>
+
+                        @if (isCalculating)
+                        {
+                            <div class="calc-loading">
+                                <div class="calc-loading-spinner"></div>
+                                <div class="calc-loading-title">Calculating…</div>
+                                <p class="calc-loading-desc">Projecting EFTSL ramp-up, revenue, cost, and margin across all cohorts and years.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="results-toolbar">
+                                <button type="button" class="@(calculationResult is null || calculationIsStale ? "button1" : "button2")" @onclick="RunCalculation">
+                                    <i class="fa-solid fa-calculator"></i> @(calculationResult is null ? "Run Calculation" : "Recalculate")
+                                </button>
+                                <button type="button" class="button2" @onclick="DownloadExcel" disabled="@(exportBytes is null)">
+                                    <i class="fa-solid fa-file-excel"></i> Export to Excel
+                                </button>
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(calcError))
+                            {
+                                <div class="mapping-error">@calcError</div>
+                            }
+
+                            @if (calculationResult is null)
+                            {
+                                <div class="calc-prereq">
+                                    <div class="calc-prereq-header">
+                                        <i class="fa-solid fa-circle-info calc-prereq-icon"></i>
+                                        <div>
+                                            <div class="calc-prereq-title">Ready to calculate?</div>
+                                            <p class="calc-prereq-subtitle">The calculation projects EFTSL cohort ramp-up and produces year-by-year revenue, cost, and margin figures based on your inputs below.</p>
+                                        </div>
+                                    </div>
+                                    <div class="calc-prereq-checklist">
+                                        <div class="checklist-item @(InputDataReady ? "check-ok" : "check-warn")">
+                                            <i class="@(InputDataReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                            <div>
+                                                <span class="calc-check-label">Input Data</span>
+                                                <span class="calc-check-detail">@(InputDataReady ? "EFTSL values entered" : "No EFTSL values — go to Input Data tab")</span>
+                                            </div>
+                                        </div>
+                                        <div class="checklist-item @(UnitsReady ? "check-ok" : "check-warn")">
+                                            <i class="@(UnitsReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                            <div>
+                                                <span class="calc-check-label">Units</span>
+                                                <span class="calc-check-detail">@(UnitsReady ? $"{program!.Units.Count} unit{(program!.Units.Count == 1 ? "" : "s")} configured" : "No units added — go to Units tab")</span>
+                                            </div>
+                                        </div>
+                                        <div class="checklist-item @(CostRevenueReady ? "check-ok" : "check-warn")">
+                                            <i class="@(CostRevenueReady ? "fa-solid fa-circle-check" : "fa-solid fa-circle-exclamation")"></i>
+                                            <div>
+                                                <span class="calc-check-label">Cost &amp; Revenue</span>
+                                                <span class="calc-check-detail">@(CostRevenueReady ? "CPH and NFC values set" : "Missing CPH or NFC — go to Cost & Revenue tab")</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="button1 calc-prereq-btn" @onclick="RunCalculation">
+                                        <i class="fa-solid fa-calculator"></i> Run Calculation
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                @if (calculationIsStale)
+                                {
+                                    <div class="calc-stale-banner">
+                                        <i class="fa-solid fa-triangle-exclamation"></i>
+                                        <span>Inputs have changed since the last calculation — results below may be out of date.</span>
+                                        <button type="button" class="calc-stale-btn" @onclick="RunCalculation">Recalculate</button>
+                                    </div>
+                                }
+                                <!-- Year summary cards -->
+                            <div class="results-cards">
+                                @foreach (var row in calculationResult.CostResults)
+                                {
+                                    <div class="result-card">
+                                        <div class="result-card-year">@row.CalendarYear</div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Total EFTSL</span>
+                                            <span class="result-card-value">@FormatNumber(row.TotalEftsl)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Teaching Hours</span>
+                                            <span class="result-card-value">@FormatNumber(row.TotalTeachingHours)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Revenue</span>
+                                            <span class="result-card-value">@FormatCurrency(row.FacultyRevenue)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Total Cost</span>
+                                            <span class="result-card-value">@FormatCurrency(row.FacultyCost + row.NonFacultyCost)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Margin</span>
+                                            <span class="result-card-value @(row.TotalMargin >= 0 ? "positive" : "negative")">@FormatCurrency(row.TotalMargin)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Margin %</span>
+                                            <span class="result-card-value @(row.TotalMarginPercent >= 0 ? "positive" : "negative")">@FormatPercent(row.TotalMarginPercent)</span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- Charts -->
+                            <div class="charts-row">
+                                <div class="chart-card">
+                                    <div class="chart-card-title">Revenue vs Cost</div>
+                                    <div class="chart-canvas-wrap">
+                                        <canvas id="costRevenueChart"></canvas>
+                                    </div>
+                                </div>
+                                <div class="chart-card">
+                                    <div class="chart-card-title">EFTSL Ramp-up by Cohort</div>
+                                    <div class="chart-canvas-wrap">
+                                        <canvas id="eftslRampupChart"></canvas>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- EFTSL ramp-up triangle table -->
+                            <h3 class="grid-header">EFTSL by Forecast Year and Cohort</h3>
+                            <div style="overflow-x:auto;margin-bottom:28px;">
+                                <table class="rampup-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Forecast Year</th>
+                                            @foreach (var ci in RampCohorts)
+                                            {
+                                                <th>Intake @(program!.StartYear + ci)</th>
+                                            }
+                                            <th>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var costRow in calculationResult.CostResults)
+                                        {
+                                            <tr>
+                                                <td><strong>@costRow.CalendarYear</strong></td>
+                                                @foreach (var ci in RampCohorts)
+                                                {
+                                                    var cohortFirstH = calculationResult.HourResults
+                                                        .FirstOrDefault(h => h.ForecastYearIndex == costRow.YearIndex && h.CohortStartYearIndex == ci);
+                                                    var eftsl = cohortFirstH is null ? 0 : cohortFirstH.DomesticEftsl + cohortFirstH.InternationalEftsl + cohortFirstH.CgsEftsl;
+                                                    var sy = costRow.YearIndex - ci + 1;
+                                                    <td>
+                                                        @if (eftsl > 0)
+                                                        {
+                                                            <span>@FormatNumber(eftsl) <span style="font-size:11px;color:#94a3b8;">(Yr@sy)</span></span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="rampup-empty">—</span>
+                                                        }
+                                                    </td>
+                                                }
+                                                <td class="rampup-total">@FormatNumber(costRow.TotalEftsl)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Collapsible cohort detail -->
+                            <h3 class="grid-header">Unit Detail</h3>
+                            @foreach (var forecastGroup in calculationResult.HourResults.GroupBy(h => h.ForecastYearIndex).OrderBy(g => g.Key))
+                            {
+                                var fyi = forecastGroup.Key;
+                                var costRow2 = calculationResult.CostResults.FirstOrDefault(c => c.YearIndex == fyi);
+                                var isOpen = expandedYears.Contains(fyi);
+                                <div class="detail-section">
+                                    <button type="button" class="detail-section-toggle @(isOpen ? "open" : "")"
+                                            @onclick="() => ToggleYear(fyi)">
+                                        <i class="fa-solid fa-chevron-right toggle-icon"></i>
+                                        <span>@(program!.StartYear + fyi)</span>
+                                        <span style="font-weight:400;color:#64748b;font-size:13px;">
+                                            &mdash; @FormatNumber(costRow2?.TotalEftsl ?? 0) EFTSL &nbsp;·&nbsp;
+                                            @FormatCurrency(costRow2?.FacultyRevenue ?? 0) revenue &nbsp;·&nbsp;
+                                            @FormatCurrency(costRow2?.TotalMargin ?? 0) margin
+                                        </span>
+                                    </button>
+                                    @if (isOpen)
+                                    {
+                                        <div class="detail-section-body">
+                                            @foreach (var cohortGroup in forecastGroup.GroupBy(h => h.CohortStartYearIndex).OrderBy(g => g.Key))
+                                            {
+                                                var studyYear = cohortGroup.First().StudyYear;
+                                                var firstCohortH = cohortGroup.First();
+                                                var cohortEftsl = firstCohortH.DomesticEftsl + firstCohortH.InternationalEftsl + firstCohortH.CgsEftsl;
+                                                <div class="cohort-group-header">
+                                                    Intake @(program!.StartYear + cohortGroup.Key) &mdash; Study Year @studyYear &mdash; @FormatNumber(cohortEftsl) EFTSL
+                                                </div>
+                                                <table class="tableStyleResults textAlignRight">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Unit</th>
+                                                            <th>Profile</th>
+                                                            <th>Dom EFTSL</th>
+                                                            <th>Int EFTSL</th>
+                                                            <th>CGS EFTSL</th>
+                                                            <th>Students / Unit</th>
+                                                            <th>New Unit Hours</th>
+                                                            <th>Student Hours</th>
+                                                            <th>Total Hours</th>
+                                                            <th>Revenue</th>
+                                                            <th>Faculty Cost</th>
+                                                            <th>Non-Fac Cost</th>
+                                                            <th>Total Cost</th>
+                                                            <th>Margin</th>
+                                                            <th>Margin %</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        @foreach (var hour in cohortGroup)
+                                                        {
+                                                            <tr>
+                                                                <td class="textAlignLeft">@hour.Unit</td>
+                                                                <td class="textAlignLeft">@hour.Profile</td>
+                                                                <td>@FormatNumber(hour.DomesticEftsl)</td>
+                                                                <td>@FormatNumber(hour.InternationalEftsl)</td>
+                                                                <td>@FormatNumber(hour.CgsEftsl)</td>
+                                                                <td>@FormatNumber(hour.StudentsPerUnit)</td>
+                                                                <td>@FormatNumber(hour.NewUnitHours)</td>
+                                                                <td>@FormatNumber(hour.StudentHours)</td>
+                                                                <td>@FormatNumber(hour.TotalHours)</td>
+                                                                <td>@FormatCurrency(hour.FacultyRevenue)</td>
+                                                                <td>@FormatCurrency(hour.FacultyCost)</td>
+                                                                <td>@FormatCurrency(hour.NonFacultyCost)</td>
+                                                                <td>@FormatCurrency(hour.TotalCost)</td>
+                                                                <td class="@(hour.Margin >= 0 ? "positive" : "negative")">@FormatCurrency(hour.Margin)</td>
+                                                                <td class="@(hour.MarginPercent >= 0 ? "positive" : "negative")">@FormatPercent(hour.MarginPercent)</td>
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            }   @* end else (calculationResult is not null) *@
+                        }   @* end else (not calculating) *@
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "BreakEven")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Breakeven Analysis</h3>
+                            <p class="tab-section-desc">At what enrolment does this program cover its costs? Breakeven EFTSL is derived from the contribution margin — revenue minus variable costs per EFTSL — over the fixed expense floor.</p>
+                        </div>
+
+                        @if (calculationResult is null)
+                        {
+                            <div class="calc-prereq">
+                                <div class="calc-prereq-header">
+                                    <i class="fa-solid fa-circle-info calc-prereq-icon"></i>
+                                    <div>
+                                        <div class="calc-prereq-title">Run a calculation first</div>
+                                        <p class="calc-prereq-subtitle">Breakeven analysis is generated automatically when you run the calculation on the Results tab.</p>
+                                    </div>
+                                </div>
+                                <button type="button" class="button1 calc-prereq-btn" @onclick='() => SetActiveTab("Results")'>
+                                    <i class="fa-solid fa-arrow-right"></i> Go to Results
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            @if (calculationIsStale)
+                            {
+                                <div class="calc-stale-banner">
+                                    <i class="fa-solid fa-triangle-exclamation"></i>
+                                    <span>Inputs have changed — breakeven figures may be out of date.</span>
+                                    <button type="button" class="calc-stale-btn" @onclick='() => SetActiveTab("Results")'>Recalculate</button>
+                                </div>
+                            }
+
+                            <!-- Year summary cards -->
+                            <div class="results-cards">
+                                @foreach (var be in calculationResult.BreakevenResults)
+                                {
+                                    var chipClass = !be.IsBreakevenPossible ? "impossible"
+                                        : be.EftslSurplus >= 0 ? "above" : "below";
+                                    var chipIcon = !be.IsBreakevenPossible ? "fa-triangle-exclamation"
+                                        : be.EftslSurplus >= 0 ? "fa-circle-check" : "fa-circle-xmark";
+                                    var chipLabel = !be.IsBreakevenPossible ? "Not possible"
+                                        : be.EftslSurplus >= 0 ? "Above breakeven" : "Below breakeven";
+                                    var progressPct = be.IsBreakevenPossible && be.BreakevenEftsl > 0
+                                        ? Math.Min(100, be.ProjectedEftsl / be.BreakevenEftsl * 100) : 0;
+
+                                    <div class="result-card">
+                                        <div class="result-card-year">@be.CalendarYear</div>
+                                        <span class="be-status-chip @chipClass">
+                                            <i class="fa-solid @chipIcon"></i> @chipLabel
+                                        </span>
+                                        <div class="be-progress-wrap">
+                                            <div class="be-progress-bar @chipClass" style="width:@(progressPct.ToString("F1"))%"></div>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Breakeven EFTSL</span>
+                                            <span class="result-card-value">
+                                                @(be.IsBreakevenPossible ? FormatNumber(be.BreakevenEftsl) : "—")
+                                            </span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Projected EFTSL</span>
+                                            <span class="result-card-value">@FormatNumber(be.ProjectedEftsl)</span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">Surplus / Deficit</span>
+                                            <span class="result-card-value @(be.EftslSurplus >= 0 ? "positive" : "negative")">
+                                                @(be.IsBreakevenPossible ? (be.EftslSurplus >= 0 ? "+" : "") + FormatNumber(be.EftslSurplus) : "—")
+                                            </span>
+                                        </div>
+                                        <div class="result-card-row">
+                                            <span class="result-card-label">vs Breakeven</span>
+                                            <span class="result-card-value @(be.SurplusPercent >= 0 ? "positive" : "negative")">
+                                                @(be.IsBreakevenPossible ? FormatPercent(be.SurplusPercent) : "—")
+                                            </span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- CVP chart with year selector -->
+                            <div class="be-chart-card">
+                                <div class="be-chart-title">Cost vs Revenue by EFTSL — where the lines cross is your breakeven</div>
+                                <div class="be-year-tabs">
+                                    @for (var yi = 0; yi < calculationResult.BreakevenResults.Count; yi++)
+                                    {
+                                        var capturedYi = yi;
+                                        var beRow = calculationResult.BreakevenResults[yi];
+                                        <button type="button"
+                                                class="be-year-tab @(selectedBreakevenYearIndex == capturedYi ? "active" : "")"
+                                                @onclick="() => SelectBreakevenYear(capturedYi)">
+                                            @beRow.CalendarYear
+                                        </button>
+                                    }
+                                </div>
+                                <div class="be-chart-wrap">
+                                    <canvas id="breakevenChart"></canvas>
+                                </div>
+                            </div>
+
+                            <!-- Contribution margin detail table -->
+                            <h3 class="grid-header">Contribution Margin Detail</h3>
+                            <div style="overflow-x:auto; margin-bottom:28px;">
+                                <table class="be-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Year</th>
+                                            <th>Rev / EFTSL</th>
+                                            <th>Var Cost / EFTSL</th>
+                                            <th>CM / EFTSL</th>
+                                            <th>Fixed Cost</th>
+                                            <th>Breakeven EFTSL</th>
+                                            <th>Projected EFTSL</th>
+                                            <th>Surplus / Deficit</th>
+                                            <th>vs Breakeven</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var be in calculationResult.BreakevenResults)
+                                        {
+                                            <tr>
+                                                <td>@be.CalendarYear</td>
+                                                <td>@FormatCurrency(be.RevenuePerEftsl)</td>
+                                                <td>@FormatCurrency(be.VariableCostPerEftsl)</td>
+                                                <td>@FormatCurrency(be.ContributionMarginPerEftsl)</td>
+                                                <td>@FormatCurrency(be.FixedCost)</td>
+                                                <td>@(be.IsBreakevenPossible ? FormatNumber(be.BreakevenEftsl) : "—")</td>
+                                                <td>@FormatNumber(be.ProjectedEftsl)</td>
+                                                <td class="@(be.EftslSurplus >= 0 ? "be-surplus-cell" : "be-deficit-cell")">
+                                                    @(be.IsBreakevenPossible ? (be.EftslSurplus >= 0 ? "+" : "") + FormatNumber(be.EftslSurplus) : "—")
+                                                </td>
+                                                <td class="@(be.SurplusPercent >= 0 ? "be-surplus-cell" : "be-deficit-cell")">
+                                                    @(be.IsBreakevenPossible ? FormatPercent(be.SurplusPercent) : "—")
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Compare")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Compare</h3>
+                            <p class="tab-section-desc">Program comparison will be wired after calculation results are available in Blazor state.</p>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Benchmark")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Benchmark</h3>
+                            <p class="tab-section-desc">Set your peer-group filters and see how this program compares against the sector. Run the calculation first to see results.</p>
+                        </div>
+
+                        @* ── Peer-group filter panel — always visible ── *@
+                        <div class="bm-filter-panel" style="margin-bottom:20px;">
+                            <p class="cr-panel-title" style="margin:0 0 10px;">Peer Group Filters</p>
+                            @if (isLoadingBenchmarkFilters)
+                            {
+                                <div style="font-size:13px;color:#64748b;"><i class="fa-solid fa-spinner fa-spin"></i> Loading filter options…</div>
+                            }
+                            else
+                            {
+                                <div class="bm-filter-grid">
+                                    <div class="bm-filter-field">
+                                        <label class="bm-filter-label">Degree Level</label>
+                                        <select class="dropDownList1"
+                                                @bind="program.BmDegreeLevel"
+                                                @bind:after="OnBenchmarkFilterChanged">
+                                            <option value="">— Any —</option>
+                                            @foreach (var opt in (benchmarkFilters?.DegreeLevels ?? new()))
+                                            {
+                                                <option value="@opt">@opt</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="bm-filter-field">
+                                        <label class="bm-filter-label">Field of Education (FOE)</label>
+                                        <select class="dropDownList1"
+                                                @bind="program.BmFoe"
+                                                @bind:after="OnBenchmarkFilterChanged">
+                                            <option value="">— Any —</option>
+                                            @foreach (var opt in (benchmarkFilters?.FoeCodes ?? new()))
+                                            {
+                                                <option value="@opt">@opt</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="bm-filter-field">
+                                        <label class="bm-filter-label">Period</label>
+                                        <select class="dropDownList1"
+                                                @bind="program.BmPeriodName"
+                                                @bind:after="OnBenchmarkFilterChanged">
+                                            <option value="">— Any —</option>
+                                            @foreach (var opt in (benchmarkFilters?.PeriodNames ?? new()))
+                                            {
+                                                <option value="@opt">@opt</option>
+                                            }
+                                        </select>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        @if (calculationResult is null)
+                        {
+                            <div class="intel-prereq">
+                                <i class="fa-solid fa-circle-info"></i>
+                                <div>
+                                    <strong>Run the calculation first.</strong> Go to the Results tab and run the calculation, then come back here to see how this program compares against sector benchmarks.
+                                </div>
+                            </div>
+                        }
+                        else if (isLoadingBenchmark)
+                        {
+                            <div class="calc-loading">
+                                <div class="calc-loading-spinner"></div>
+                                <div class="calc-loading-title">Loading benchmark data…</div>
+                                <p class="calc-loading-desc">Querying sector data for your peer group.</p>
+                            </div>
+                        }
+                        else if (!string.IsNullOrWhiteSpace(benchmarkError))
+                        {
+                            <div class="mapping-error">@benchmarkError</div>
+                            <div style="margin-top:12px;">
+                                <button type="button" class="button2" @onclick="LoadBenchmarkDataAsync">
+                                    <i class="fa-solid fa-rotate-right"></i> Retry
+                                </button>
+                            </div>
+                        }
+                        else if (benchmarkData.Count == 0)
+                        {
+                            <div class="bm-empty-state">
+                                <i class="fa-solid fa-chart-bar"></i>
+                                <p>No benchmark data returned for the selected filters. Try adjusting the <strong>Degree Level</strong>, <strong>FOE</strong>, or <strong>Period</strong> above.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="bm-layout">
+
+                                @* Context strip *@
+                                @{
+                                    var summaryN = benchmarkData.Max(m => m.BenchmarkN);
+                                    var summaryConf = benchmarkData.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.Confidence))?.Confidence ?? "";
+                                }
+                                <div class="bm-summary-strip">
+                                    @if (!string.IsNullOrWhiteSpace(program.BmDegreeLevel))
+                                    {
+                                        <span class="bm-summary-item"><i class="fa-solid fa-graduation-cap"></i> @program.BmDegreeLevel</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(program.BmFoe))
+                                    {
+                                        <span class="bm-summary-item"><i class="fa-solid fa-tag"></i> FOE @program.BmFoe</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(program.BmPeriodName))
+                                    {
+                                        <span class="bm-summary-item"><i class="fa-solid fa-calendar"></i> @program.BmPeriodName</span>
+                                    }
+                                    <span class="bm-summary-item"><i class="fa-solid fa-database"></i> <strong>@summaryN</strong> institutions</span>
+                                    @if (!string.IsNullOrWhiteSpace(summaryConf))
+                                    {
+                                        <span class="bm-summary-item @($"bm-conf-{summaryConf.ToLower().Replace(" ", "-")}")">
+                                            <i class="fa-solid fa-shield-halved"></i> <strong>@summaryConf</strong> confidence
+                                        </span>
+                                    }
+                                    <button type="button" class="button2" style="margin-left:auto;padding:4px 10px;font-size:12px;" @onclick="LoadBenchmarkDataAsync" disabled="@isLoadingBenchmark">
+                                        <i class="fa-solid fa-rotate-right"></i> Refresh
+                                    </button>
+                                </div>
+
+                                @* Program Fit *@
+                                @{
+                                    var fitRows = BenchmarkFitRows().ToList();
+                                }
+                                @if (fitRows.Any())
+                                {
+                                    <div class="bm-section">
+                                        <p class="cr-panel-title">Program Fit</p>
+                                        <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
+                                            Compares this program's cost, revenue and margin against the sector weighted mean. Revenue and margin are averaged per EFTSL across all forecast years. The bar spans the benchmark min–max range; the grey tick is the sector mean and the blue marker is this program.
+                                        </p>
+                                        <table class="tableStyle2 bm-fit-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Metric</th>
+                                                    <th>This Program</th>
+                                                    <th class="bm-col-min">Min</th>
+                                                    <th class="bm-col-range">Range</th>
+                                                    <th class="bm-col-mean">Wtd Mean</th>
+                                                    <th class="bm-col-max">Max</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var row in fitRows)
+                                                {
+                                                    // CPH: derive min/max/mean from Staff Salary ÷ Delivery Hours
+                                                    double? bmMin = null, bmMax = null, bmMid = null;
+                                                    if (row.Label == "Faculty Cost / Hour")
+                                                    {
+                                                        var staffM = benchmarkData.FirstOrDefault(m => m.Measure == BenchmarkService.MeasureStaffSalaryPerEftsl);
+                                                        var hoursM = benchmarkData.FirstOrDefault(m => m.Measure == BenchmarkService.MeasureDeliveryHoursPerEftsl);
+                                                        if (staffM is not null && hoursM is not null)
+                                                        {
+                                                            var hMean = hoursM.WeightedMean ?? 0;
+                                                            var hMin  = hoursM.Min ?? 0;
+                                                            var hMax  = hoursM.Max ?? 0;
+                                                            if (hMean > 0) bmMid = (staffM.WeightedMean ?? 0) / hMean;
+                                                            if (hMin  > 0) bmMin = (staffM.Min ?? 0) / hMin;
+                                                            if (hMax  > 0) bmMax = (staffM.Max ?? 0) / hMax;
+                                                        }
+                                                    }
+                                                    else
+                                                    {
+                                                        var bm = benchmarkData.FirstOrDefault(m => m.Measure == row.BmMeasure);
+                                                        if (bm is not null)
+                                                        {
+                                                            bmMin = bm.Min;
+                                                            bmMax = bm.Max;
+                                                            bmMid = bm.WeightedMean;
+                                                        }
+                                                    }
+                                                    var pct = BmPositionPct(row.ProgramValue, bmMin, bmMax);
+                                                    var isAbove = bmMax.HasValue && row.ProgramValue > bmMax.Value;
+                                                    var isBelow = bmMin.HasValue && row.ProgramValue < bmMin.Value;
+                                                    <tr>
+                                                        <td>@row.Label</td>
+                                                        <td class="@(isAbove ? "bm-above" : isBelow ? "bm-below" : "bm-within")">
+                                                            @row.ProgramValue.ToString(row.Format)
+                                                            @if (isAbove) { <i class="fa-solid fa-arrow-up" style="font-size:10px;margin-left:3px;" title="Above sector max"></i> }
+                                                            else if (isBelow) { <i class="fa-solid fa-arrow-down" style="font-size:10px;margin-left:3px;" title="Below sector min"></i> }
+                                                            else { <i class="fa-solid fa-check" style="font-size:10px;margin-left:3px;" title="Within sector range"></i> }
+                                                        </td>
+                                                        <td class="bm-col-min">@(bmMin?.ToString(row.Format) ?? "–")</td>
+                                                        <td class="bm-col-range">
+                                                            @if (bmMin is not null && bmMax is not null)
+                                                            {
+                                                                <div class="bm-range-bar">
+                                                                    <div class="bm-range-fill"></div>
+                                                                    @if (bmMid.HasValue)
+                                                                    {
+                                                                        var midPct = BmPositionPct(bmMid.Value, bmMin, bmMax);
+                                                                        <div class="bm-range-avg" style="left:@(midPct.ToString("F1"))%"></div>
+                                                                    }
+                                                                    <div class="bm-range-marker" style="left:@(pct.ToString("F1"))%"></div>
+                                                                </div>
+                                                            }
+                                                        </td>
+                                                        <td class="bm-col-mean">@(bmMid?.ToString(row.Format) ?? "–")</td>
+                                                        <td class="bm-col-max">@(bmMax?.ToString(row.Format) ?? "–")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+
+                                @* Full benchmark measures table *@
+                                <div class="bm-section">
+                                    <p class="cr-panel-title">All Benchmark Measures</p>
+                                    <table class="tableStyle2 bm-full-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Measure</th>
+                                                <th>Min</th>
+                                                <th>Wtd Mean</th>
+                                                <th>Median</th>
+                                                <th>Max</th>
+                                                <th>N</th>
+                                                <th>Confidence</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var m in benchmarkData.OrderBy(m => m.Measure))
+                                            {
+                                                <tr>
+                                                    <td>@m.Measure</td>
+                                                    <td>@(m.Min?.ToString("N2") ?? "–")</td>
+                                                    <td>@(m.WeightedMean?.ToString("N2") ?? "–")</td>
+                                                    <td>@(m.Median?.ToString("N2") ?? "–")</td>
+                                                    <td>@(m.Max?.ToString("N2") ?? "–")</td>
+                                                    <td>@m.BenchmarkN</td>
+                                                    <td>@m.Confidence</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                            </div>
+                        }
+
+                        <div class="tab-footer-actions" style="margin-top:20px;">
+                            <button type="button" class="button2" @onclick="MoveToNextTab">
+                                Next: Intelligence <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+
+            @if (activeTab == "Intelligence")
+            {
+                <div class="tabcontent" style="display:block;">
+                    <div class="fixedTableWidth">
+                        <div class="tab-section-header">
+                            <h3 class="tab-section-title">Pilbara Intelligence</h3>
+                            <p class="tab-section-desc">Generate an AI-powered financial business case from your calculation results using Snowflake Cortex.</p>
+                        </div>
+
+                        @if (calculationResult is null)
+                        {
+                            <div class="intel-prereq">
+                                <i class="fa-solid fa-circle-info"></i>
+                                <div>
+                                    <strong>Run a calculation first.</strong> Pilbara Intelligence analyses your year-by-year results to produce a financial business case. Go to the Results tab and run the calculation, then come back here.
+                                </div>
+                            </div>
+                        }
+                        else if (!cortexAvailable)
+                        {
+                            <div class="intel-prereq">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                <div>
+                                    Your Snowflake role does not have Cortex access. Ask support to grant
+                                    <code>SNOWFLAKE.CORTEX_USER</code> to your role.
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="intel-panel">
+                                <div class="intel-toolbar">
+                                    <select class="dropDownList1 intel-model-select" @bind="cortexModel" disabled="@isGenerating">
+                                        <option value="mistral-large2">mistral-large2</option>
+                                        <option value="llama3.1-70b">llama3.1-70b</option>
+                                        <option value="llama3.1-405b">llama3.1-405b</option>
+                                        <option value="snowflake-arctic">snowflake-arctic</option>
+                                    </select>
+                                    <button type="button" class="button1" @onclick="GenerateBusinessCase" disabled="@isGenerating">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                        @(string.IsNullOrEmpty(cortexResponse) ? "Generate Business Case" : "Regenerate")
+                                    </button>
+                                    @if (calculationIsStale)
+                                    {
+                                        <span class="wizard-hint" style="color:#f59e0b;">
+                                            <i class="fa-solid fa-triangle-exclamation"></i> Results may be stale — recalculate first for accurate output.
+                                        </span>
+                                    }
+                                </div>
+
+                                @if (!string.IsNullOrWhiteSpace(cortexError))
+                                {
+                                    <div class="mapping-error">@cortexError</div>
+                                }
+
+                                @if (isGenerating)
+                                {
+                                    <div class="intel-spinner-wrap">
+                                        <div class="intel-spinner"></div>
+                                        <span>Sending to Cortex — this may take 20–60 seconds…</span>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(cortexResponse))
+                                {
+                                    <div class="intel-response-box">
+                                        @CortexService.RenderMarkdown(cortexResponse)
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="intel-empty-state">
+                                        <i class="fa-solid fa-brain"></i>
+                                        Select a model and click <strong>Generate Business Case</strong> to produce an AI-authored financial analysis.
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (isUnitPickerOpen)
+    {
+        <div class="unit-picker-overlay" @onclick="UnitPickerOverlayClick">
+            <div class="unit-picker-modal" @onclick:stopPropagation="true">
+
+                <div class="unit-picker-header">
+                    <h3 class="unit-picker-title">@(editingUnit is null ? "Select Unit" : "Edit Unit")</h3>
+                    <button type="button" class="row-action-btn" @onclick="CloseUnitPicker" title="Close">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <div class="unit-picker-body">
+
+                    @* LEFT: unit search + selection *@
+                    <div class="unit-picker-left">
+                        <div class="unit-picker-filters">
+                            <input type="text" class="search-input unit-picker-search-input" placeholder="Search by unit code or name..."
+                                   @bind="unitSearch" @bind:event="oninput" />
+                            <select class="dropDownList1 unit-picker-school-filter" @bind="unitSchoolFilter">
+                                <option value="">All Schools</option>
+                                @foreach (var school in Schools)
+                                {
+                                    <option value="@school">@school</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="unit-picker-list @(unitPickerError ? "picker-list-error" : "")">
+                            <div class="unit-picker-item @(selectedPickerUnit == "New Unit" ? "selected" : "")"
+                                 @onclick='() => SelectPickerUnit("New Unit")'>
+                                <span class="unit-picker-name"><span class="new-unit-pill">New</span> New Unit</span>
+                            </div>
+                            @foreach (var option in UnitPickerOptions)
+                            {
+                                <div class="unit-picker-item @(selectedPickerUnit == option.Name ? "selected" : "")"
+                                     @onclick="() => SelectPickerUnit(option.Name)">
+                                    <span class="unit-picker-name">@option.Name</span>
+                                </div>
+                            }
+                            @if (!UnitPickerOptions.Any())
+                            {
+                                <div class="unit-picker-empty">No units match your search.</div>
+                            }
+                        </div>
+                        @if (selectedPickerUnit == "New Unit")
+                        {
+                            <div class="unit-picker-name-row">
+                                <label class="meta-label" style="display:block;margin-bottom:6px;">Unit Name</label>
+                                <input type="text" class="textBoxStyle4 new-unit-name-input"
+                                       placeholder="Enter unit code or name..."
+                                       maxlength="100"
+                                       @bind="newUnitCustomName" @bind:event="oninput" />
+                                <span class="wizard-hint">Leave blank to save as an unnamed new unit.</span>
+                            </div>
+                        }
+                    </div>
+
+                    @* RIGHT: profile + FOE (scrollable) *@
+                    <div class="unit-picker-right">
+                        <div class="unit-picker-section">
+                            <label class="meta-label" style="display:block;margin-bottom:6px;">Profile</label>
+                            <select class="dropDownList1" style="width:100%;" @bind="selectedPickerProfile">
+                                @foreach (var profile in program.Profiles)
+                                {
+                                    <option value="@profile.Name">@profile.Name</option>
+                                }
+                                <option value="Custom">Custom Profile</option>
+                            </select>
+                            @if (selectedPickerProfile == "Custom")
+                            {
+                                <div class="profile-preview">
+                                    <div class="custom-profile-grid">
+                                        <div class="custom-profile-field">
+                                            <span class="profile-preview-label">Tut Size</span>
+                                            <input type="number" step="any" class="textBoxStyle4"
+                                                   @bind="customTutSize" @bind:event="oninput" />
+                                        </div>
+                                        <div class="custom-profile-field">
+                                            <span class="profile-preview-label">Lect Hours</span>
+                                            <input type="number" step="any" class="textBoxStyle4"
+                                                   @bind="customLectHours" @bind:event="oninput" />
+                                        </div>
+                                        <div class="custom-profile-field">
+                                            <span class="profile-preview-label">Tut Hours</span>
+                                            <input type="number" step="any" class="textBoxStyle4"
+                                                   @bind="customTutHours" @bind:event="oninput" />
+                                        </div>
+                                        <div class="custom-profile-field">
+                                            <span class="profile-preview-label">Prep Hours</span>
+                                            <input type="number" step="any" class="textBoxStyle4"
+                                                   @bind="customPrepHours" @bind:event="oninput" />
+                                        </div>
+                                        <div class="custom-profile-field">
+                                            <span class="profile-preview-label">Admin Hours</span>
+                                            <input type="number" step="any" class="textBoxStyle4"
+                                                   @bind="customAdminHours" @bind:event="oninput" />
+                                        </div>
+                                        <div class="custom-profile-field">
+                                            <span class="profile-preview-label">Student Hours</span>
+                                            <input type="number" step="any" class="textBoxStyle4"
+                                                   @bind="customStudentHours" @bind:event="oninput" />
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                            else if (SelectedPickerProfile is not null)
+                            {
+                                <div class="profile-preview">
+                                    <div class="profile-preview-grid">
+                                        <div class="profile-preview-item"><span class="profile-preview-label">Tut Size</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.TutSize)</span></div>
+                                        <div class="profile-preview-item"><span class="profile-preview-label">Lect Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.LectureHours)</span></div>
+                                        <div class="profile-preview-item"><span class="profile-preview-label">Tut Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.TutorialHours)</span></div>
+                                        <div class="profile-preview-item"><span class="profile-preview-label">Prep Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.PreparationHours)</span></div>
+                                        <div class="profile-preview-item"><span class="profile-preview-label">Admin Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.AdministrationHours)</span></div>
+                                        <div class="profile-preview-item"><span class="profile-preview-label">Student Hours</span><span class="profile-preview-value">@FormatNumber(SelectedPickerProfile.StudentHours)</span></div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        @if (selectedPickerUnit != "New Unit" && !string.IsNullOrWhiteSpace(selectedPickerUnit))
+                        {
+                            var uv = program.UnitValues.FirstOrDefault(v => v.UnitName == selectedPickerUnit);
+                            <div class="unit-picker-section">
+                                <label class="meta-label" style="display:block;margin-bottom:6px;">Model Values</label>
+                                @if (uv is not null)
+                                {
+                                    <div class="profile-preview">
+                                        <div class="profile-preview-grid">
+                                            <div class="profile-preview-item">
+                                                <span class="profile-preview-label">Exp / Hour</span>
+                                                <span class="profile-preview-value">@FormatCurrency(uv.FacultyCostPerHour)</span>
+                                            </div>
+                                            <div class="profile-preview-item">
+                                                <span class="profile-preview-label">CGS Rev / EFTSL</span>
+                                                <span class="profile-preview-value">@FormatCurrency(uv.CgsRevenuePerEftsl)</span>
+                                            </div>
+                                            <div class="profile-preview-item">
+                                                <span class="profile-preview-label">Dom Rev / EFTSL</span>
+                                                <span class="profile-preview-value">@FormatCurrency(uv.DomesticRevenuePerEftsl)</span>
+                                            </div>
+                                            <div class="profile-preview-item">
+                                                <span class="profile-preview-label">Int Rev / EFTSL</span>
+                                                <span class="profile-preview-value">@FormatCurrency(uv.InternationalRevenuePerEftsl)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="foe-selected-hint" style="color:#94a3b8;">
+                                        <i class="fa-solid fa-circle-info"></i>
+                                        <span>No model values available for this unit.</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+
+                        @if (program.FoeCodeOptions.Count > 0)
+                        {
+                            <div class="unit-picker-section unit-picker-section-foe">
+                                <label class="meta-label" style="display:block;margin-bottom:6px;">
+                                    FOE Code
+                                    <span class="wizard-hint" style="font-size:0.8em;margin-left:4px;">(CGS Funding Cluster rate)</span>
+                                </label>
+                                @if (selectedPickerUnit == "New Unit")
+                                {
+                                    <div class="foe-picker-filters">
+                                        <input type="text" class="search-input foe-picker-search"
+                                               placeholder="Search code or title..."
+                                               @bind="foeSearch" @bind:event="oninput" />
+                                        <select class="dropDownList1 foe-picker-filter"
+                                                value="@foeBroadFilter"
+                                                @onchange="OnFoeBroadChanged">
+                                            <option value="">All Broad FOE</option>
+                                            @foreach (var opt in FoeBroadOptions)
+                                            {
+                                                <option value="@opt.Code">@opt.Code</option>
+                                            }
+                                        </select>
+                                        <select class="dropDownList1 foe-picker-filter" @bind="foeNarrowFilter">
+                                            <option value="">All Narrow FOE</option>
+                                            @foreach (var opt in FoeNarrowOptions)
+                                            {
+                                                <option value="@opt.Code">@opt.Code</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="foe-picker-list">
+                                        @if (!FilteredFoeOptions.Any())
+                                        {
+                                            <div class="foe-picker-empty">No FOE codes match your search.</div>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var foe in FilteredFoeOptions)
+                                            {
+                                                <div class="foe-picker-item @(selectedPickerFoe == foe.FoeCodeDetailed ? "selected" : "")"
+                                                     @onclick="() => selectedPickerFoe = foe.FoeCodeDetailed">
+                                                    <span class="foe-code">@foe.FoeCodeDetailed</span>
+                                                    <span class="foe-cluster-badge">@foe.FundingCluster</span>
+                                                </div>
+                                            }
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(selectedPickerFoe))
+                                    {
+                                        var sel = program.FoeCodeOptions.FirstOrDefault(f => f.FoeCodeDetailed == selectedPickerFoe);
+                                        if (sel is not null)
+                                        {
+                                            <div class="foe-selected-hint">
+                                                <i class="fa-solid fa-circle-check" style="color:#22c55e;"></i>
+                                                <span><strong>@sel.FoeCodeDetailed</strong> &nbsp;|&nbsp; @sel.FundingCluster &nbsp;|&nbsp; @sel.CgsRatePerEftsl.ToString("C0") / EFTSL</span>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="foe-selected-hint" style="color:#94a3b8;">
+                                            <i class="fa-solid fa-circle-info"></i>
+                                            <span>No FOE selected — CGS rate defaults to 0 for this unit.</span>
+                                        </div>
+                                    }
+                                }
+                                else
+                                {
+                                    @if (!string.IsNullOrWhiteSpace(selectedPickerFoe))
+                                    {
+                                        var sel = program.FoeCodeOptions.FirstOrDefault(f => f.FoeCodeDetailed == selectedPickerFoe);
+                                        if (sel is not null)
+                                        {
+                                            <div class="foe-selected-hint">
+                                                <i class="fa-solid fa-circle-check" style="color:#22c55e;"></i>
+                                                <span><strong>@sel.FoeCodeDetailed</strong> &nbsp;|&nbsp; @sel.FundingCluster &nbsp;|&nbsp; @sel.CgsRatePerEftsl.ToString("C0") / EFTSL</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="foe-selected-hint" style="color:#94a3b8;">
+                                                <i class="fa-solid fa-circle-info"></i>
+                                                <span>FOE: @selectedPickerFoe — rate not found in current year options.</span>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="foe-selected-hint" style="color:#94a3b8;">
+                                            <i class="fa-solid fa-circle-info"></i>
+                                            <span>No FOE assigned — CGS rate defaults to 0 for this unit.</span>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+
+                </div>
+
+                <div class="unit-picker-footer">
+                    <button type="button" class="button2" @onclick="CloseUnitPicker">Cancel</button>
+                    <button type="button" class="button1" @onclick="ConfirmUnitPicker">@(editingUnit is null ? "Add Unit" : "Update Unit")</button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public Guid ProgramId { get; set; }
+    [Inject] private ProgramService ProgramSvc { get; set; } = default!;
+    [Inject] private ProgramCalculationService CalculationSvc { get; set; } = default!;
+    [Inject] private ExcelExportService ExportSvc { get; set; } = default!;
+    [Inject] private CortexService CortexSvc { get; set; } = default!;
+    [Inject] private BenchmarkService BenchmarkSvc { get; set; } = default!;
+    [Inject] private ITenantContext TenantCtx { get; set; } = default!;
+
+    private readonly string[] tabs = ["Details", "InputData", "Units", "CostRevenue", "Results", "BreakEven", "Compare", "Benchmark", "Intelligence"];
+    private ProgramDetailsDto? program;
+    private string activeTab = "Details";
+    private bool isLoading = true;
+    private string? loadError;
+    private string? saveError;
+    private string? statusMessage;
+    private string? calcError;
+    private int degreeYearCount = 1;
+    private bool isCalculating;
+    private bool calculationIsStale;
+    private ProgramCalculationResultDto? calculationResult;
+    private byte[]? exportBytes;
+    private HashSet<int> expandedYears = new();
+    private bool pendingChartRender;
+
+    private string cortexModel = "mistral-large2";
+    private string cortexResponse = "";
+    private bool isGenerating;
+    private string? cortexError;
+
+    // ── Tags ─────────────────────────────────────────────────────
+    private string newTagInput = "";
+    private List<string> ParsedTags => program?.Tags
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .ToList() ?? new();
+
+    private void AddTag()
+    {
+        if (string.IsNullOrWhiteSpace(newTagInput) || program is null) return;
+        var trimmed = newTagInput.Trim();
+        var tags = ParsedTags;
+        if (!tags.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
+            tags.Add(trimmed);
+        program.Tags = string.Join(", ", tags);
+        newTagInput = "";
+    }
+
+    private void RemoveTag(string tag)
+    {
+        if (program is null) return;
+        program.Tags = string.Join(", ", ParsedTags.Where(t => !t.Equals(tag, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void OnTagInputKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") AddTag();
+    }
+
+    // ── Setup checklist helpers ──────────────────────────────────
+    private int SetupStepsComplete =>
+        (InputDataReady ? 1 : 0) + (UnitsReady ? 1 : 0) +
+        (CostRevenueReady ? 1 : 0) + (calculationResult is not null ? 1 : 0);
+
+    private (string Title, string Description, string ButtonText, string TabTarget) GetSuggestedNextStep()
+    {
+        if (!InputDataReady)
+            return ("Add input data", "Enter EFTSL enrolment values for each projection year to get started.", "Go to Input Data", "InputData");
+        if (!UnitsReady)
+            return ("Add program units", "Add the units that make up this program and assign delivery profiles.", "Go to Units", "Units");
+        if (!CostRevenueReady)
+            return ("Set cost & revenue", "Configure faculty cost per hour and non-faculty cost per EFTSL.", "Go to Cost & Revenue", "CostRevenue");
+        if (calculationResult is null || calculationIsStale)
+            return ("Run calculation", "All setup steps are done. Run your first calculation to see projected results and breakeven analysis.", "Run calculation", "Results");
+        return ("Review your results", "Your calculation is up to date. Explore the Results, Breakeven, and Benchmark tabs.", "View Results", "Results");
+    }
+
+    // ── Benchmark state ───────────────────────────────────────────
+    private BenchmarkFilterOptionsDto? benchmarkFilters;
+    private List<BenchmarkMeasureDto> benchmarkData = new();
+    private bool benchmarkFiltersLoaded;
+    private bool isLoadingBenchmarkFilters;
+    private bool isLoadingBenchmark;
+    private string? benchmarkError;
+    private string? cgsYearError;
+
+    // Whether the signed-in user's Snowflake role can reach Cortex. Resolved once at
+    // load rather than probed per render.
+    private bool cortexAvailable;
+
+    private int selectedBreakevenYearIndex;
+    private bool isUnitPickerOpen;
+    private bool unitPickerError;
+    private int unitPickerYear = 1;
+    private ProgramUnitDto? editingUnit;
+    private string selectedPickerUnit = "";
+    private string selectedPickerProfile = "";
+    private string selectedPickerFoe = "";
+    private string foeSearch = "";
+    private string foeBroadFilter = "";
+    private string foeNarrowFilter = "";
+    private string newUnitCustomName = "";
+    private double customTutSize;
+    private double customLectHours;
+    private double customTutHours;
+    private double customPrepHours;
+    private double customAdminHours;
+    private double customStudentHours;
+    private string unitSearch = "";
+    private string unitSchoolFilter = "";
+
+    private int DegreeYearCount => Math.Max(degreeYearCount, Math.Max(1, program?.Units.Select(u => u.ProgramYear).DefaultIfEmpty(1).Max() ?? 1));
+
+    private IEnumerable<string> Schools =>
+        program?.ModelValues.Select(v => v.School).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s)
+        ?? Enumerable.Empty<string>();
+
+    private IEnumerable<string> Courses =>
+        program?.ModelValues
+            .Where(v => string.IsNullOrWhiteSpace(program.SchoolSelect) || v.School == program.SchoolSelect)
+            .Select(v => v.CourseName)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct()
+            .OrderBy(c => c)
+        ?? Enumerable.Empty<string>();
+
+    private IEnumerable<ProgramUnitOptionDto> FilteredUnitOptions =>
+        program?.UnitOptions
+            .Where(u => string.IsNullOrWhiteSpace(program.SchoolSelect) || u.School == program.SchoolSelect)
+            .OrderBy(u => u.Name)
+        ?? Enumerable.Empty<ProgramUnitOptionDto>();
+
+    private IEnumerable<ProgramUnitOptionDto> UnitPickerOptions =>
+        program?.UnitOptions
+            .Where(u => string.IsNullOrWhiteSpace(unitSchoolFilter) || u.School == unitSchoolFilter)
+            .Where(u => string.IsNullOrWhiteSpace(unitSearch) || u.Name.Contains(unitSearch, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(u => u.Name)
+        ?? Enumerable.Empty<ProgramUnitOptionDto>();
+
+    private IEnumerable<FoeCodeOptionDto> FilteredFoeOptions =>
+        program?.FoeCodeOptions
+            .Where(f => string.IsNullOrWhiteSpace(foeBroadFilter) || f.FoeCodeBroad == foeBroadFilter)
+            .Where(f => string.IsNullOrWhiteSpace(foeNarrowFilter) || f.FoeCodeNarrow == foeNarrowFilter)
+            .Where(f => string.IsNullOrWhiteSpace(foeSearch) ||
+                f.FoeCodeDetailed.Contains(foeSearch, StringComparison.OrdinalIgnoreCase) ||
+                f.FoeTitleDetailed.Contains(foeSearch, StringComparison.OrdinalIgnoreCase))
+        ?? Enumerable.Empty<FoeCodeOptionDto>();
+
+    private IEnumerable<(string Code, string Title)> FoeBroadOptions =>
+        program?.FoeCodeOptions
+            .Select(f => (Code: f.FoeCodeBroad, Title: f.FoeTitleBroad))
+            .Distinct()
+            .OrderBy(f => f.Code)
+        ?? Enumerable.Empty<(string, string)>();
+
+    private IEnumerable<(string Code, string Title)> FoeNarrowOptions =>
+        program?.FoeCodeOptions
+            .Where(f => string.IsNullOrWhiteSpace(foeBroadFilter) || f.FoeCodeBroad == foeBroadFilter)
+            .Select(f => (Code: f.FoeCodeNarrow, Title: f.FoeTitleNarrow))
+            .Distinct()
+            .OrderBy(f => f.Code)
+        ?? Enumerable.Empty<(string, string)>();
+
+    private ProgramProfileDto? SelectedPickerProfile =>
+        selectedPickerProfile == "Custom"
+            ? new ProgramProfileDto
+            {
+                Name = "Custom",
+                TutSize = customTutSize,
+                LectureHours = customLectHours,
+                TutorialHours = customTutHours,
+                PreparationHours = customPrepHours,
+                AdministrationHours = customAdminHours,
+                StudentHours = customStudentHours
+            }
+            : program?.Profiles.FirstOrDefault(p => p.Name == selectedPickerProfile);
+
+    private List<ModelValueSummaryDto> ModelValueSummaries =>
+        program?.ModelValues
+            .Where(v => string.IsNullOrWhiteSpace(program.SchoolSelect) || v.School == program.SchoolSelect)
+            .Where(v => string.IsNullOrWhiteSpace(program.CourseSelect) || v.CourseName == program.CourseSelect)
+            .GroupBy(v => new { v.School, v.Career })
+            .Select(g =>
+            {
+                var facultyExpense = g.Sum(x => x.FacultyExpense);
+                var nonFacultyExpense = g.Sum(x => x.NonFacultyExpense);
+                var domEftsl = g.Sum(x => x.DomesticEftsl);
+                var intEftsl = g.Sum(x => x.InternationalEftsl);
+                var cgsEftsl = g.Sum(x => x.CgsEftsl);
+                var totalEftsl = domEftsl + intEftsl + cgsEftsl;
+                var deliveryHours = g.Sum(x => x.DeliveryHours);
+                return new ModelValueSummaryDto
+                {
+                    School = g.Key.School,
+                    Career = g.Key.Career,
+                    CostPerHour = deliveryHours == 0 ? 0 : facultyExpense / deliveryHours,
+                    NonCostPerEftsl = totalEftsl == 0 ? 0 : nonFacultyExpense / totalEftsl,
+                    RevCgsPerEftsl = cgsEftsl == 0 ? 0 : g.Sum(x => x.CgsRevenue) / cgsEftsl,
+                    RevDomPerEftsl = domEftsl == 0 ? 0 : g.Sum(x => x.DomesticRevenue) / domEftsl,
+                    RevIntPerEftsl = intEftsl == 0 ? 0 : g.Sum(x => x.InternationalRevenue) / intEftsl,
+                    DeliveryHours = deliveryHours,
+                    DomesticEftsl = domEftsl,
+                    InternationalEftsl = intEftsl
+                };
+            })
+            .OrderBy(v => v.Career)
+            .ToList()
+        ?? new List<ModelValueSummaryDto>();
+
+    private ModelValueSummaryDto? SelectedModelValue =>
+        ModelValueSummaries.FirstOrDefault(v => v.Career == program?.CareerSelect);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        loadError = null;
+        try
+        {
+            var access = await TenantCtx.GetAsync();
+            if (!access.Ok)
+            {
+                loadError = access.Reason;
+                return;
+            }
+            cortexAvailable = access.Capabilities.Cortex;
+
+            program = await ProgramSvc.GetDetailsAsync(ProgramId);
+            if (program is null)
+            {
+                loadError = "Program not found.";
+                return;
+            }
+
+            degreeYearCount = Math.Max(1, program.Units.Select(u => u.ProgramYear).DefaultIfEmpty(1).Max());
+            if (program.Settings.Count == 0)
+            {
+                program.Settings.Add(new ProgramYearSettingDto { Year = 0 });
+            }
+            if (string.IsNullOrWhiteSpace(program.Profile) && program.Profiles.Count > 0)
+            {
+                program.Profile = program.Profiles[0].Name;
+            }
+
+            // Load benchmark filter options in the background (populates Details tab dropdowns)
+            if (!benchmarkFiltersLoaded)
+                _ = LoadBenchmarkFiltersAsync();
+
+            // Load the benchmark measures too, so a Benchmark cost source resolves
+            // straight away rather than only after the Benchmark tab has been opened.
+            if (HasBenchmarkFilters)
+                _ = EnsureBenchmarkDataAsync();
+        }
+        catch (Exception ex)
+        {
+            loadError = $"Failed to load program: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private RenderFragment InputRow(
+        string label,
+        string rowClass,
+        Func<ProgramYearSettingDto, double> getter,
+        Action<ProgramYearSettingDto, double> setter) => builder =>
+    {
+        if (program is null) return;
+        var seq = 0;
+        builder.OpenElement(seq++, "tr");
+        builder.AddAttribute(seq++, "class", $"input-row {rowClass}");
+        builder.OpenElement(seq++, "td");
+        builder.AddAttribute(seq++, "class", "irow-label");
+        builder.AddContent(seq++, label);
+        builder.CloseElement();
+        foreach (var setting in program.Settings)
+        {
+            builder.OpenElement(seq++, "td");
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "type", "number");
+            builder.AddAttribute(seq++, "step", "any");
+            builder.AddAttribute(seq++, "value", BindConverter.FormatValue(getter(setting)));
+            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<double>(this, value => { setter(setting, value); MarkStale(); }, getter(setting)));
+            builder.CloseElement();
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+    };
+
+    private RenderFragment CrEditorCard(string label, string field) => builder =>
+    {
+        if (program is null) return;
+        var selected = GetSource(field);
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-editor-card");
+
+        // Title
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-editor-title");
+        builder.AddContent(seq++, label);
+        builder.CloseElement();
+
+        // Source buttons
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-source-group");
+        foreach (var option in SourceOptions(field))
+        {
+            var capturedOption = option;
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "type", "button");
+            builder.AddAttribute(seq++, "class", $"cr-source-btn {(selected == option ? "active" : "")}");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => SetSource(field, capturedOption)));
+            builder.AddContent(seq++, SourceLabel(option));
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+
+        // Value input/display
+        if (field == "RevCgs" && selected == "Cluster")
+        {
+            // Year selector — determines which year's FOE rates are active
+            if (program.CgsClusterYearOptions.Count > 0)
+            {
+                builder.OpenElement(seq++, "select");
+                builder.AddAttribute(seq++, "class", "dropDownList1 cr-editor-input");
+                builder.AddAttribute(seq++, "value", program.CgsClusterYear.ToString());
+                builder.AddAttribute(seq++, "onchange", EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    async e => { if (int.TryParse(e.Value?.ToString(), out var yr)) await OnCgsYearChanged(yr); }));
+                foreach (var yr in program.CgsClusterYearOptions)
+                {
+                    builder.OpenElement(seq++, "option");
+                    builder.AddAttribute(seq++, "value", yr.ToString());
+                    builder.AddContent(seq++, yr.ToString() + " rates");
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+            }
+
+            // Informational note — rates are set per unit via FOE code
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", "wizard-hint");
+            builder.AddContent(seq++, "Rate per unit is set by the FOE code selected on each unit.");
+            builder.CloseElement();
+
+            if (!string.IsNullOrWhiteSpace(cgsYearError))
+            {
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "mapping-error");
+                builder.AddContent(seq++, cgsYearError);
+                builder.CloseElement();
+            }
+        }
+        else if (selected == "Custom")
+        {
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "type", "number");
+            builder.AddAttribute(seq++, "step", "any");
+            builder.AddAttribute(seq++, "class", "textBoxStyle4 cr-editor-input");
+            builder.AddAttribute(seq++, "value", BindConverter.FormatValue(GetCustomValue(field)));
+            builder.AddAttribute(seq++, "onchange", EventCallback.Factory.CreateBinder<double>(this, v => SetCustomValue(field, v), GetCustomValue(field)));
+            builder.CloseElement();
+        }
+        else if (selected == "Benchmark")
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", "wizard-hint");
+            if (benchmarkData.Count == 0)
+                builder.AddContent(seq++, "No benchmark data loaded. Configure filters and load data on the Benchmark tab.");
+            else
+            {
+                var bmSrc = field == "Cph" ? "Staff Salary / Delivery Hours per EFTSL" : "Non Salary per EFTSL";
+                builder.AddContent(seq++, $"Using sector weighted mean from benchmark ({bmSrc}).");
+            }
+            builder.CloseElement();
+        }
+
+        // Resolved value strip
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "cr-resolved");
+        builder.OpenElement(seq++, "span");
+        builder.AddAttribute(seq++, "class", "cr-resolved-label");
+        builder.AddContent(seq++, "Effective value");
+        builder.CloseElement();
+        builder.OpenElement(seq++, "span");
+        builder.AddAttribute(seq++, "class", "cr-resolved-value");
+        builder.AddContent(seq++, FormatNumber(ResolvedValue(field)));
+        builder.CloseElement();
+        builder.CloseElement();
+
+        builder.CloseElement(); // cr-editor-card
+    };
+
+    // ── Benchmark helpers ─────────────────────────────────────────
+
+    // Called by @bind:after on each benchmark filter dropdown
+    private async Task OnBenchmarkFilterChanged()
+    {
+        benchmarkData = new();
+        benchmarkError = null;
+        // A different peer group changes the resolved cost values
+        if (UsesBenchmarkSource)
+            MarkStale();
+        // Only auto-load when at least one filter is set
+        if (HasBenchmarkFilters)
+        {
+            await (benchmarkLoadTask = LoadBenchmarkDataAsync());
+        }
+    }
+
+    private bool HasBenchmarkFilters =>
+        !string.IsNullOrWhiteSpace(program?.BmDegreeLevel)
+        || !string.IsNullOrWhiteSpace(program?.BmFoe)
+        || !string.IsNullOrWhiteSpace(program?.BmPeriodName);
+
+    private bool UsesBenchmarkSource =>
+        GetSource("Cph") == "Benchmark" || GetSource("Nfc") == "Benchmark";
+
+    // Loads benchmark measures once, sharing an in-flight load rather than starting another.
+    private Task? benchmarkLoadTask;
+    private Task EnsureBenchmarkDataAsync()
+    {
+        if (benchmarkData.Count > 0) return Task.CompletedTask;
+        if (benchmarkLoadTask is { IsCompleted: false }) return benchmarkLoadTask;
+        return benchmarkLoadTask = LoadBenchmarkDataAsync();
+    }
+
+    private async Task LoadBenchmarkFiltersAsync()
+    {
+        if (benchmarkFiltersLoaded || isLoadingBenchmarkFilters) return;
+        isLoadingBenchmarkFilters = true;
+        try
+        {
+            benchmarkFilters = await BenchmarkSvc.GetFilterOptionsAsync();
+            benchmarkFiltersLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            benchmarkError = $"Could not load benchmark filters: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingBenchmarkFilters = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadBenchmarkDataAsync()
+    {
+        if (program is null) return;
+        isLoadingBenchmark = true;
+        benchmarkError = null;
+        benchmarkData = new();
+        try
+        {
+            benchmarkData = await BenchmarkSvc.GetMeasuresAsync(
+                program.BmDegreeLevel, program.BmFoe, program.BmPeriodName);
+            if (benchmarkData.Count == 0)
+                benchmarkError = "No benchmark data found for the selected filters. Check the peer group settings on the Details tab.";
+        }
+        catch (Exception ex)
+        {
+            benchmarkError = $"Benchmark query failed: {ex.Message}";
+        }
+        finally
+        {
+            isLoadingBenchmark = false;
+            StateHasChanged();
+        }
+    }
+
+    // Key measures for program-fit comparison
+    // (Label, BmMeasure, ProgramValue, Format)
+    private IEnumerable<(string Label, string BmMeasure, double ProgramValue, string Format)> BenchmarkFitRows()
+    {
+        if (program is null || benchmarkData.Count == 0) yield break;
+
+        // Delivery hours / EFTSL from model values (if available)
+        var totalMv = program.ModelValues.Sum(m => m.DomesticEftsl + m.InternationalEftsl + m.CgsEftsl);
+        var deliveryHoursPerEftsl = totalMv > 0
+            ? program.ModelValues.Sum(m => m.DeliveryHours) / totalMv
+            : 0;
+
+        var cph = ResolvedValue("Cph");
+        var nfc = ResolvedValue("Nfc");
+
+        // CPH: compared against Staff Salary / Delivery Hours derived benchmark
+        yield return ("Faculty Cost / Hour",
+            BenchmarkService.MeasureStaffSalaryPerEftsl,   // sentinel — CPH is handled specially in the table
+            cph, "C0");
+
+        yield return ("Non-Faculty Cost / EFTSL",
+            BenchmarkService.MeasureNonSalaryPerEftsl,
+            nfc, "C0");
+
+        if (deliveryHoursPerEftsl > 0)
+        {
+            yield return ("Total Cost / EFTSL",
+                BenchmarkService.MeasureCostPerEftsl,
+                cph * deliveryHoursPerEftsl + nfc, "C0");
+
+            yield return ("Delivery Hours / EFTSL",
+                BenchmarkService.MeasureDeliveryHoursPerEftsl,
+                deliveryHoursPerEftsl, "N1");
+        }
+
+        // Revenue and margin come from the calculation, EFTSL-weighted across all forecast years
+        var costResults = calculationResult?.CostResults ?? new();
+        var calcEftsl = costResults.Sum(r => r.TotalEftsl);
+        if (calcEftsl > 0)
+        {
+            yield return ("Revenue / EFTSL",
+                BenchmarkService.MeasureTotalRevPerEftsl,
+                costResults.Sum(r => r.FacultyRevenue) / calcEftsl, "C0");
+
+            yield return ("Margin / EFTSL",
+                BenchmarkService.MeasureMarginPerEftsl,
+                costResults.Sum(r => r.TotalMargin) / calcEftsl, "C0");
+        }
+    }
+
+    // Compute where the program value sits within [min, max] as a 0-100 percentage
+    private static double BmPositionPct(double programVal, double? min, double? max)
+    {
+        if (min is null || max is null || max <= min) return 50;
+        var clamped = Math.Clamp(programVal, min.Value, max.Value);
+        return (clamped - min.Value) / (max.Value - min.Value) * 100;
+    }
+
+    private async Task PersistProgram()
+    {
+        if (program is null) return;
+
+        saveError = null;
+        statusMessage = null;
+        try
+        {
+            program.Settings = program.Settings.Select((setting, index) =>
+            {
+                setting.Year = index;
+                return setting;
+            }).ToList();
+            await ProgramSvc.SaveDetailsAsync(program);
+            program.SaveDate = DateTime.Now;
+            statusMessage = "Program saved successfully.";
+        }
+        catch (Exception ex)
+        {
+            saveError = $"Error saving program: {ex.Message}";
+        }
+    }
+
+    private void MarkStale()
+    {
+        if (calculationResult is not null)
+            calculationIsStale = true;
+    }
+
+    private async Task RunCalculation()
+    {
+        if (program is null) return;
+
+        isCalculating = true;
+        calcError = null;
+        statusMessage = null;
+        exportBytes = null;
+        expandedYears.Clear();
+        try
+        {
+            await PersistProgram();
+            if (!string.IsNullOrWhiteSpace(saveError)) return;
+
+            if (UsesBenchmarkSource)
+            {
+                await EnsureBenchmarkDataAsync();
+                var missing = new[] { "Cph", "Nfc" }
+                    .Where(f => GetSource(f) == "Benchmark" && GetBenchmarkValue(f) <= 0)
+                    .Select(f => f == "Cph" ? "faculty cost per hour" : "non-faculty cost per EFTSL")
+                    .ToList();
+                if (missing.Count > 0)
+                {
+                    calcError = $"No benchmark value for {string.Join(" or ", missing)}. Check the benchmark peer group on the Details tab, or switch that cost source to Custom or Model.";
+                    return;
+                }
+            }
+            program.BmCphValue = GetBenchmarkValue("Cph");
+            program.BmNfcValue = GetBenchmarkValue("Nfc");
+
+            calculationResult = CalculationSvc.Calculate(program);
+            exportBytes = ExportSvc.GenerateResultsWorkbook(calculationResult, program);
+            calculationIsStale = false;
+            statusMessage = "Calculation complete.";
+            pendingChartRender = true;
+        }
+        catch (Exception ex)
+        {
+            calculationResult = null;
+            calcError = ex.Message;
+        }
+        finally
+        {
+            isCalculating = false;
+        }
+    }
+
+    private async Task RenderCharts()
+    {
+        if (calculationResult is null || program is null) return;
+
+        var labels = calculationResult.CostResults.Select(r => r.CalendarYear.ToString()).ToArray();
+        var facultyCosts = calculationResult.CostResults.Select(r => r.FacultyCost).ToArray();
+        var nonFacCosts = calculationResult.CostResults.Select(r => r.NonFacultyCost).ToArray();
+        var revenues = calculationResult.CostResults.Select(r => r.FacultyRevenue).ToArray();
+
+        await JS.InvokeVoidAsync("chartHelpers.renderCostRevenue",
+            "costRevenueChart", labels, facultyCosts, nonFacCosts, revenues);
+
+        var cohortIndices = calculationResult.HourResults
+            .Select(h => h.CohortStartYearIndex).Distinct().OrderBy(i => i).ToList();
+
+        var cohortDatasets = cohortIndices.Select(ci => new
+        {
+            label = $"Intake {program.StartYear + ci}",
+            data = calculationResult.CostResults.Select(cr =>
+            {
+                var fh = calculationResult.HourResults
+                    .FirstOrDefault(h => h.ForecastYearIndex == cr.YearIndex && h.CohortStartYearIndex == ci);
+                return fh is null ? 0.0 : fh.DomesticEftsl + fh.InternationalEftsl + fh.CgsEftsl;
+            }).ToArray()
+        }).ToArray();
+
+        await JS.InvokeVoidAsync("chartHelpers.renderEftslRampup",
+            "eftslRampupChart", labels, cohortDatasets);
+
+        await RenderBreakevenChart();
+    }
+
+    private async Task RenderBreakevenChart()
+    {
+        if (calculationResult is null) return;
+        if (calculationResult.BreakevenResults.Count == 0) return;
+        var idx = Math.Clamp(selectedBreakevenYearIndex, 0, calculationResult.BreakevenResults.Count - 1);
+        var be = calculationResult.BreakevenResults[idx];
+        if (be.ChartPoints.Count == 0) return;
+
+        await JS.InvokeVoidAsync("chartHelpers.renderBreakeven",
+            "breakevenChart",
+            be.ChartPoints.Select(p => new { eftsl = p.Eftsl, revenue = p.Revenue, totalCost = p.TotalCost }),
+            be.ProjectedEftsl);
+    }
+
+    private async Task SelectBreakevenYear(int yearIndex)
+    {
+        selectedBreakevenYearIndex = yearIndex;
+        await RenderBreakevenChart();
+    }
+
+    private void ToggleYear(int yearIndex)
+    {
+        if (!expandedYears.Remove(yearIndex))
+            expandedYears.Add(yearIndex);
+    }
+
+    private async Task DownloadExcel()
+    {
+        if (exportBytes is null || program is null) return;
+        var filename = $"{program.Name.Replace(" ", "_")}_Results.xlsx";
+        await JS.InvokeVoidAsync("fileHelpers.download", filename, Convert.ToBase64String(exportBytes));
+    }
+
+    private void AddProjectionYear()
+    {
+        if (program is null || program.Settings.Count >= 15) return;
+        program.Settings.Add(new ProgramYearSettingDto { Year = program.Settings.Count });
+        MarkStale();
+    }
+
+    private void RemoveProjectionYear()
+    {
+        if (program is null || program.Settings.Count <= 1) return;
+        program.Settings.RemoveAt(program.Settings.Count - 1);
+        MarkStale();
+    }
+
+    private void AddDegreeYear()
+    {
+        degreeYearCount++;
+    }
+
+    private void RemoveDegreeYear()
+    {
+        if (program is null || DegreeYearCount <= 1) return;
+        program.Units.RemoveAll(u => u.ProgramYear == DegreeYearCount);
+        degreeYearCount = Math.Max(1, degreeYearCount - 1);
+    }
+
+    private void OpenUnitPicker(int year, ProgramUnitDto? unit = null)
+    {
+        if (program is null) return;
+        unitPickerYear = year;
+        editingUnit = unit;
+
+        // If editing a unit not in UnitOptions (custom-named), treat as "New Unit" with the name pre-filled
+        if (unit is not null && !program.UnitOptions.Any(o => o.Name == unit.Unit))
+        {
+            selectedPickerUnit = "New Unit";
+            newUnitCustomName = unit.Unit;
+        }
+        else
+        {
+            selectedPickerUnit = unit?.Unit ?? "New Unit";
+            newUnitCustomName = "";
+        }
+
+        selectedPickerProfile = unit?.Profile ?? program.Profiles.FirstOrDefault()?.Name ?? "Standard";
+        var rawFoe = unit?.FoeCodeDetailed ?? "";
+        selectedPickerFoe = ResolveCanonicalFoe(rawFoe)?.FoeCodeDetailed ?? rawFoe;
+        foeSearch = "";
+        foeBroadFilter = "";
+        foeNarrowFilter = "";
+
+        if (unit?.Profile == "Custom")
+        {
+            customTutSize = unit.CustomTutSize ?? 20;
+            customLectHours = unit.CustomLectHours ?? 0;
+            customTutHours = unit.CustomTutHours ?? 0;
+            customPrepHours = unit.CustomPrepHours ?? 0;
+            customAdminHours = unit.CustomAdminHours ?? 0;
+            customStudentHours = unit.CustomStudentHours ?? 0;
+        }
+        else
+        {
+            customTutSize = 20;
+            customLectHours = 0;
+            customTutHours = 0;
+            customPrepHours = 0;
+            customAdminHours = 0;
+            customStudentHours = 0;
+        }
+
+        unitPickerError = false;
+        unitSearch = "";
+        unitSchoolFilter = "";
+        isUnitPickerOpen = true;
+    }
+
+    private void CloseUnitPicker()
+    {
+        isUnitPickerOpen = false;
+        editingUnit = null;
+    }
+
+    private void UnitPickerOverlayClick()
+    {
+        CloseUnitPicker();
+    }
+
+    private void SelectPickerUnit(string unit)
+    {
+        selectedPickerUnit = unit;
+        unitPickerError = false;
+
+        if (unit == "New Unit")
+        {
+            selectedPickerFoe = "";
+        }
+        else if (program is not null)
+        {
+            var option = program.UnitOptions.FirstOrDefault(o => o.Name == unit);
+            var rawFoe = !string.IsNullOrWhiteSpace(option?.FoeCodeDetailed)
+                ? option.FoeCodeDetailed
+                : program.Units.FirstOrDefault(u => u.Unit == unit)?.FoeCodeDetailed ?? "";
+            selectedPickerFoe = ResolveCanonicalFoe(rawFoe)?.FoeCodeDetailed ?? rawFoe;
+        }
+    }
+
+    private void ConfirmUnitPicker()
+    {
+        if (program is null) return;
+
+        var unitName = selectedPickerUnit == "New Unit"
+            ? (string.IsNullOrWhiteSpace(newUnitCustomName) ? "New Unit" : newUnitCustomName.Trim())
+            : selectedPickerUnit;
+
+        if (string.IsNullOrWhiteSpace(unitName))
+        {
+            unitPickerError = true;
+            return;
+        }
+
+        if (editingUnit is null)
+        {
+            var newUnit = new ProgramUnitDto
+            {
+                Unit = unitName,
+                Profile = selectedPickerProfile,
+                ProgramYear = unitPickerYear,
+                FoeCodeDetailed = selectedPickerFoe
+            };
+            if (selectedPickerProfile == "Custom")
+            {
+                newUnit.CustomTutSize = customTutSize;
+                newUnit.CustomLectHours = customLectHours;
+                newUnit.CustomTutHours = customTutHours;
+                newUnit.CustomPrepHours = customPrepHours;
+                newUnit.CustomAdminHours = customAdminHours;
+                newUnit.CustomStudentHours = customStudentHours;
+            }
+            program.Units.Add(newUnit);
+        }
+        else
+        {
+            editingUnit.Unit = unitName;
+            editingUnit.Profile = selectedPickerProfile;
+            editingUnit.ProgramYear = unitPickerYear;
+            editingUnit.FoeCodeDetailed = selectedPickerFoe;
+            if (selectedPickerProfile == "Custom")
+            {
+                editingUnit.CustomTutSize = customTutSize;
+                editingUnit.CustomLectHours = customLectHours;
+                editingUnit.CustomTutHours = customTutHours;
+                editingUnit.CustomPrepHours = customPrepHours;
+                editingUnit.CustomAdminHours = customAdminHours;
+                editingUnit.CustomStudentHours = customStudentHours;
+            }
+            else
+            {
+                editingUnit.CustomTutSize = null;
+                editingUnit.CustomLectHours = null;
+                editingUnit.CustomTutHours = null;
+                editingUnit.CustomPrepHours = null;
+                editingUnit.CustomAdminHours = null;
+                editingUnit.CustomStudentHours = null;
+            }
+        }
+
+        MarkStale();
+        CloseUnitPicker();
+    }
+
+    private void RemoveUnit(ProgramUnitDto unit)
+    {
+        program?.Units.Remove(unit);
+        MarkStale();
+    }
+
+    private void SelectModelValue(ModelValueSummaryDto value)
+    {
+        if (program is null) return;
+        program.SchoolSelect = value.School;
+        program.CareerSelect = value.Career;
+    }
+
+    private void SetActiveTab(string tab)
+    {
+        activeTab = tab;
+        if (calculationResult is not null && (tab == "Results" || tab == "BreakEven"))
+            pendingChartRender = true;
+        // Auto-load benchmark data when the tab is opened and the program has been calculated
+        if (tab == "Benchmark" && calculationResult is not null)
+            _ = EnsureBenchmarkDataAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (pendingChartRender)
+        {
+            pendingChartRender = false;
+            await RenderCharts();
+        }
+    }
+
+    private void MoveToNextTab()
+    {
+        var nextTab = tabs[Math.Min(Array.IndexOf(tabs, activeTab) + 1, tabs.Length - 1)];
+        SetActiveTab(nextTab);
+    }
+
+    private string GetSource(string field) => field switch
+    {
+        "RevCgs" => program?.RevCgsSelect ?? "Custom",
+        "RevDom" => program?.RevDomSelect ?? "Custom",
+        "RevInt" => program?.RevIntSelect ?? "Custom",
+        "Cph" => program?.CphSelect ?? "Custom",
+        "Nfc" => program?.NfcSelect ?? "Custom",
+        _ => "Custom"
+    };
+
+    private void SetSource(string field, string value)
+    {
+        if (program is null) return;
+        switch (field)
+        {
+            case "RevCgs": program.RevCgsSelect = value; break;
+            case "RevDom": program.RevDomSelect = value; break;
+            case "RevInt": program.RevIntSelect = value; break;
+            case "Cph": program.CphSelect = value; break;
+            case "Nfc": program.NfcSelect = value; break;
+        }
+        MarkStale();
+    }
+
+    private void OnFoeBroadChanged(ChangeEventArgs e)
+    {
+        foeBroadFilter = e.Value?.ToString() ?? "";
+        foeNarrowFilter = "";
+    }
+
+    private async Task OnCgsYearChanged(int year)
+    {
+        if (program is null) return;
+        program.CgsClusterYear = year;
+        cgsYearError = null;
+        try
+        {
+            program.FoeCodeOptions = await ProgramSvc.GetFoeCodeOptionsForYearAsync(year);
+        }
+        catch (Exception ex)
+        {
+            cgsYearError = $"Could not load FOE code options: {ex.Message}";
+        }
+        MarkStale();
+    }
+
+    private double GetCustomValue(string field) => field switch
+    {
+        "RevCgs" => program?.RevCgsCustom ?? 0,
+        "RevDom" => program?.RevDomCustom ?? 0,
+        "RevInt" => program?.RevIntCustom ?? 0,
+        "Cph" => program?.CphCustom ?? 0,
+        "Nfc" => program?.NfcCustom ?? 0,
+        _ => 0
+    };
+
+    private void SetCustomValue(string field, double value)
+    {
+        if (program is null) return;
+        switch (field)
+        {
+            case "RevCgs": program.RevCgsCustom = value; break;
+            case "RevDom": program.RevDomCustom = value; break;
+            case "RevInt": program.RevIntCustom = value; break;
+            case "Cph": program.CphCustom = value; break;
+            case "Nfc": program.NfcCustom = value; break;
+        }
+        MarkStale();
+    }
+
+    private double GetModelValue(string field) => field switch
+    {
+        "RevCgs" => SelectedModelValue?.RevCgsPerEftsl ?? 0,
+        "RevDom" => SelectedModelValue?.RevDomPerEftsl ?? 0,
+        "RevInt" => SelectedModelValue?.RevIntPerEftsl ?? 0,
+        "Cph" => SelectedModelValue?.CostPerHour ?? 0,
+        "Nfc" => SelectedModelValue?.NonCostPerEftsl ?? 0,
+        _ => 0
+    };
+
+    private double ResolvedValue(string field) => GetSource(field) switch
+    {
+        "Model" => GetModelValue(field),
+        "Cluster" when field == "RevCgs" => FoeAverageCgsRate(),
+        "Benchmark" => GetBenchmarkValue(field),
+        _ => GetCustomValue(field)
+    };
+
+    private double GetBenchmarkValue(string field)
+    {
+        if (benchmarkData.Count == 0) return 0;
+        if (field == "Nfc")
+            return benchmarkData.FirstOrDefault(m => m.Measure == BenchmarkService.MeasureNonSalaryPerEftsl)
+                       ?.WeightedMean ?? 0;
+        if (field == "Cph")
+        {
+            var staffPerEftsl = benchmarkData
+                .FirstOrDefault(m => m.Measure == BenchmarkService.MeasureStaffSalaryPerEftsl)
+                ?.WeightedMean ?? 0;
+            var hoursPerEftsl = benchmarkData
+                .FirstOrDefault(m => m.Measure == BenchmarkService.MeasureDeliveryHoursPerEftsl)
+                ?.WeightedMean ?? 0;
+            return hoursPerEftsl > 0 ? staffPerEftsl / hoursPerEftsl : 0;
+        }
+        return 0;
+    }
+
+    // Average CGS rate across all units with a FOE code set — used for the "effective value" display strip.
+    private double FoeAverageCgsRate()
+    {
+        if (program is null || program.FoeCodeOptions.Count == 0) return 0;
+        var rates = program.Units
+            .Where(u => !string.IsNullOrWhiteSpace(u.FoeCodeDetailed))
+            .Select(u => ResolveCanonicalFoe(u.FoeCodeDetailed)?.CgsRatePerEftsl ?? 0)
+            .ToList();
+        return rates.Count == 0 ? 0 : rates.Average();
+    }
+
+    // Matches a raw FOE code string (any separator format) to the canonical FoeCodeOptionDto
+    // by comparing just the leading 6 numeric digits.
+    private FoeCodeOptionDto? ResolveCanonicalFoe(string raw)
+    {
+        if (program is null || string.IsNullOrWhiteSpace(raw)) return null;
+        var prefix = new string(raw.TakeWhile(char.IsDigit).ToArray());
+        if (prefix.Length < 6) return null;
+        prefix = prefix[..6];
+        return program.FoeCodeOptions.FirstOrDefault(f => f.FoeCodeDetailed.StartsWith(prefix));
+    }
+
+    private bool HasSnowflakeSource => !string.IsNullOrWhiteSpace(program?.SourceDb);
+
+    private IEnumerable<string> SourceOptions(string field)
+    {
+        // "Model" requires live Snowflake data — not available for manual scenarios
+        if (!HasSnowflakeSource)
+            return field == "RevCgs" ? ["Custom", "Cluster"] : ["Custom"];
+        if (field == "RevCgs") return ["Custom", "Cluster", "Model"];
+        if (field is "Cph" or "Nfc") return ["Custom", "Model", "Benchmark"];
+        return ["Custom", "Model"];
+    }
+
+    private static string SourceLabel(string source) => source switch
+    {
+        "Cluster" => "Funding Clusters",
+        "Model" => "Model Value",
+        "Benchmark" => "Benchmark",
+        _ => source
+    };
+
+    private static string TabLabel(string tab) => tab switch
+    {
+        "InputData" => "Input Data",
+        "CostRevenue" => "Cost & Revenue",
+        "BreakEven" => "Breakeven",
+        "Benchmark" => "Benchmark",
+        "Intelligence" => "Intelligence",
+        _ => tab
+    };
+
+    private static string TabIcon(string tab) => tab switch
+    {
+        "Details" => "fa-solid fa-circle-info",
+        "InputData" => "fa-solid fa-table-columns",
+        "Units" => "fa-solid fa-book-open",
+        "CostRevenue" => "fa-solid fa-circle-dollar-to-slot",
+        "Results" => "fa-solid fa-square-poll-vertical",
+        "BreakEven" => "fa-solid fa-chart-line",
+        "Compare" => "fa-solid fa-ranking-star",
+        "Benchmark" => "fa-solid fa-chart-bar",
+        "Intelligence" => "fa-solid fa-brain",
+        _ => "fa-solid fa-circle"
+    };
+
+    private List<int> RampCohorts => calculationResult?.HourResults
+        .Select(h => h.CohortStartYearIndex).Distinct().OrderBy(i => i).ToList()
+        ?? new List<int>();
+
+    // ── Details tab computed state ────────────────────────────────
+    private bool InputDataReady => program?.Settings.Any(s => s.DomesticEftsl + s.InternationalEftsl + s.CgsEftsl > 0) ?? false;
+    private bool UnitsReady => (program?.Units.Count ?? 0) > 0;
+    private bool CostRevenueReady => ResolvedValue("Cph") > 0 && ResolvedValue("Nfc") > 0;
+    private double PeakEftsl => calculationResult?.CostResults.Max(r => r.TotalEftsl) ?? 0;
+    private int PeakCalendarYear => calculationResult?.CostResults.OrderByDescending(r => r.TotalEftsl).FirstOrDefault()?.CalendarYear ?? 0;
+    private double TotalRevenue => calculationResult?.CostResults.Sum(r => r.FacultyRevenue) ?? 0;
+    private double AvgMarginPercent => (calculationResult?.CostResults.Count ?? 0) > 0
+        ? calculationResult!.CostResults.Average(r => r.TotalMarginPercent) : 0;
+
+    private async Task GenerateBusinessCase()
+    {
+        if (program is null || calculationResult is null) return;
+        isGenerating = true;
+        cortexError = null;
+        cortexResponse = "";
+        try
+        {
+            cortexResponse = await CortexSvc.GenerateBusinessCaseAsync(program, calculationResult, cortexModel);
+        }
+        catch (Exception ex)
+        {
+            cortexError = $"Cortex error: {ex.Message}";
+        }
+        finally
+        {
+            isGenerating = false;
+        }
+    }
+
+    // ── JS interop ────────────────────────────────────────────────
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    private static string FormatDate(DateTime? date) => date?.ToString("dd MMM yyyy") ?? "";
+    private static string FormatNumber(double value) => value.ToString("N2");
+    private static string FormatCurrency(double value) => value.ToString("C0");
+    private static string FormatPercent(double value) => value.ToString("P1");
+}

@@ -6,6 +6,30 @@ public class ProgramCalculationResultDto
     public int StartYear { get; set; }
     public List<CostCalculationDto> CostResults { get; set; } = new();
     public List<HourCalculationDto> HourResults { get; set; } = new();
+    public List<BreakevenCalculationDto> BreakevenResults { get; set; } = new();
+}
+
+public class BreakevenCalculationDto
+{
+    public int YearIndex { get; set; }
+    public int CalendarYear { get; set; }
+    public double ProjectedEftsl { get; set; }
+    public double BreakevenEftsl { get; set; }
+    public double EftslSurplus { get; set; }           // positive = above breakeven
+    public double SurplusPercent { get; set; }          // (projected - breakeven) / breakeven
+    public double FixedCost { get; set; }
+    public double RevenuePerEftsl { get; set; }
+    public double VariableCostPerEftsl { get; set; }
+    public double ContributionMarginPerEftsl { get; set; }
+    public bool IsBreakevenPossible { get; set; }
+    public List<BreakevenChartPoint> ChartPoints { get; set; } = new();
+}
+
+public class BreakevenChartPoint
+{
+    public double Eftsl { get; set; }
+    public double Revenue { get; set; }
+    public double TotalCost { get; set; }
 }
 
 public class CostCalculationDto

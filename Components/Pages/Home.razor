@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@using ProgramInsights.Services.Tenancy
 
 <PageTitle>Home - Program Insights</PageTitle>
 
@@ -53,9 +54,9 @@
                                         @onclick="() => OpenEditScenario(s)">
                                     <i class="fa-solid fa-pen-to-square"></i>
                                 </button>
-                                <button type="button" class="scenario-action-btn scenario-action-delete" title="Delete"
+                                <button type="button" class="scenario-action-btn scenario-action-delete" title="Delete" aria-label="Delete scenario"
                                         @onclick:stopPropagation="true"
-                                        @onclick="() => DeleteScenario(s.Id)">
+                                        @onclick="() => DeleteScenario(s.Id, s.Name)">
                                     <i class="fa-solid fa-trash-alt"></i>
                                 </button>
                             </div>
@@ -242,8 +243,9 @@
                                     <td class="date-cell">@p.SaveDate?.ToString("dd MMM yyyy")</td>
                                     <td>
                                         <button type="button" class="row-icon-btn row-icon-delete"
+                                                title="Delete program" aria-label="Delete program"
                                                 @onclick:stopPropagation="true"
-                                                @onclick="() => DeleteProgram(p.Id)">
+                                                @onclick="() => DeleteProgram(p.Id, p.Name)">
                                             <i class="fas fa-trash-alt"></i>
                                         </button>
                                     </td>
@@ -538,7 +540,7 @@
     [Inject] private ScenarioService ScenarioSvc { get; set; } = default!;
     [Inject] private ProgramService ProgramSvc { get; set; } = default!;
     [Inject] private DataMappingService MappingSvc { get; set; } = default!;
-    [Inject] private IConfiguration Config { get; set; } = default!;
+    [Inject] private ITenantContext TenantCtx { get; set; } = default!;
     [Inject] private NavigationManager Nav { get; set; } = default!;
 
     // ── State ──────────────────────────────────────────────────────
@@ -583,21 +585,16 @@
     // ── Lifecycle ─────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
     {
-        if (!ScenarioSvc.IsConfigured)
-        {
-            isLoadingScenarios = false;
-            return;
-        }
-
         try
         {
-            var tenantIdStr = Config["App:TenantId"] ?? "";
-            if (!Guid.TryParse(tenantIdStr, out var tenantId))
+            var access = await TenantCtx.GetAsync();
+            if (!access.Ok)
             {
-                loadError = "TenantId not configured in appsettings.json.";
+                loadError = access.Reason;
                 isLoadingScenarios = false;
                 return;
             }
+            var tenantId = access.TenantId;
             scenarios = await ScenarioSvc.GetAllAsync(tenantId);
         }
         catch (Exception ex)
@@ -678,18 +675,13 @@
     {
         if (string.IsNullOrWhiteSpace(scenarioName)) { scenarioError = "Name is required."; return; }
 
-        if (!ScenarioSvc.IsConfigured)
+        var scenarioAccess = await TenantCtx.GetAsync();
+        if (!scenarioAccess.Ok)
         {
-            scenarioError = "Snowflake connection not configured.";
+            scenarioError = scenarioAccess.Reason ?? "Your account is not provisioned for Program Insights.";
             return;
         }
-
-        var tenantIdStr = Config["App:TenantId"] ?? "";
-        if (!Guid.TryParse(tenantIdStr, out var tenantId))
-        {
-            scenarioError = "TenantId not configured.";
-            return;
-        }
+        var tenantId = scenarioAccess.TenantId;
 
         if (!scenarioUseSnowflake) scenarioSourceDb = "";
 
@@ -725,12 +717,18 @@
         }
     }
 
-    private async Task DeleteScenario(Guid id)
+    private async Task DeleteScenario(Guid id, string name)
     {
-        if (!ScenarioSvc.IsConfigured) { scenarios.RemoveAll(x => x.Id == id); return; }
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete scenario \"{name}\" and all of its programs? This cannot be undone."))
+            return;
 
-        var tenantIdStr = Config["App:TenantId"] ?? "";
-        if (!Guid.TryParse(tenantIdStr, out var tenantId)) return;
+        var deleteAccess = await TenantCtx.GetAsync();
+        if (!deleteAccess.Ok)
+        {
+            loadError = deleteAccess.Reason;
+            return;
+        }
+        var tenantId = deleteAccess.TenantId;
 
         try
         {
@@ -761,12 +759,6 @@
     {
         if (string.IsNullOrWhiteSpace(programName)) { programError = "Name is required."; return; }
 
-        if (!ProgramSvc.IsConfigured)
-        {
-            programError = "Snowflake connection not configured.";
-            return;
-        }
-
         isSaving = true;
         try
         {
@@ -790,9 +782,11 @@
         }
     }
 
-    private async Task DeleteProgram(Guid id)
+    private async Task DeleteProgram(Guid id, string name)
     {
-        if (!ProgramSvc.IsConfigured) { programs.RemoveAll(x => x.Id == id); return; }
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete program \"{name}\"? This cannot be undone."))
+            return;
+
         try
         {
             await ProgramSvc.DeleteAsync(selectedScenarioId!.Value, id);

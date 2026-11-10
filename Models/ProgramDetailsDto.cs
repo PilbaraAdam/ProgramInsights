@@ -31,13 +31,31 @@ public class ProgramDetailsDto
     public string CareerSelect { get; set; } = "";
     public string Profile { get; set; } = "Standard";
 
+    // Metadata
+    public string Owner { get; set; } = "";
+    public string Status { get; set; } = "Active";
+    public string Tags { get; set; } = "";
+
     public List<ProgramYearSettingDto> Settings { get; set; } = new();
     public List<ProgramUnitDto> Units { get; set; } = new();
     public List<ProgramProfileDto> Profiles { get; set; } = new();
     public List<ProgramUnitOptionDto> UnitOptions { get; set; } = new();
     public List<ProgramUnitValueDto> UnitValues { get; set; } = new();
     public List<ModelValueDto> ModelValues { get; set; } = new();
-    public List<ConstantOptionDto> CgsClusters { get; set; } = new();
+    public List<FoeCodeOptionDto> FoeCodeOptions { get; set; } = new();
+    public int CgsClusterYear { get; set; }
+    public List<int> CgsClusterYearOptions { get; set; } = new();
+
+    // Benchmark peer-group filters (persisted)
+    public string BmDegreeLevel { get; set; } = "";
+    public string BmFoe { get; set; } = "";
+    public string BmPeriodName { get; set; } = "";
+
+    // Benchmark-derived cost values (not persisted). Set by the caller from the
+    // loaded benchmark measures before calculating; used when CphSelect / NfcSelect
+    // is "Benchmark".
+    public double BmCphValue { get; set; }
+    public double BmNfcValue { get; set; }
 }
 
 public class ProgramYearSettingDto
@@ -56,6 +74,7 @@ public class ProgramUnitDto
     public string Unit { get; set; } = "";
     public string Profile { get; set; } = "";
     public int ProgramYear { get; set; } = 1;
+    public string FoeCodeDetailed { get; set; } = "";
 
     // Custom profile values — only used when Profile == "Custom"
     public double? CustomTutSize { get; set; }
@@ -81,6 +100,7 @@ public class ProgramUnitOptionDto
 {
     public string Name { get; set; } = "";
     public string School { get; set; } = "";
+    public string FoeCodeDetailed { get; set; } = "";
 }
 
 public class ProgramUnitValueDto
@@ -91,12 +111,12 @@ public class ProgramUnitValueDto
     public double DomesticEftsl { get; set; }
     public double InternationalEftsl { get; set; }
     public double CgsEftsl { get; set; }
+    public double TotalEftsl { get; set; }   // raw SUM(EFTSL) — used for NFC denominator
     public double DomesticRevenue { get; set; }
     public double InternationalRevenue { get; set; }
     public double CgsRevenue { get; set; }
     public double DeliveryHours { get; set; }
 
-    public double TotalEftsl => DomesticEftsl + InternationalEftsl + CgsEftsl;
     public double FacultyCostPerHour => DeliveryHours == 0 ? 0 : FacultyExpense / DeliveryHours;
     public double NonFacultyCostPerEftsl => TotalEftsl == 0 ? 0 : NonFacultyExpense / TotalEftsl;
     public double DomesticRevenuePerEftsl => DomesticEftsl == 0 ? 0 : DomesticRevenue / DomesticEftsl;
@@ -114,6 +134,7 @@ public class ModelValueDto
     public double DomesticEftsl { get; set; }
     public double InternationalEftsl { get; set; }
     public double CgsEftsl { get; set; }
+    public double TotalEftsl { get; set; }   // raw SUM(EFTSL) — used for NFC denominator
     public double DomesticRevenue { get; set; }
     public double InternationalRevenue { get; set; }
     public double CgsRevenue { get; set; }
@@ -138,4 +159,16 @@ public class ConstantOptionDto
 {
     public string Name { get; set; } = "";
     public double Value { get; set; }
+}
+
+public class FoeCodeOptionDto
+{
+    public string FoeCodeDetailed { get; set; } = "";
+    public string FoeTitleDetailed { get; set; } = "";
+    public string FoeCodeNarrow { get; set; } = "";
+    public string FoeTitleNarrow { get; set; } = "";
+    public string FoeCodeBroad { get; set; } = "";
+    public string FoeTitleBroad { get; set; } = "";
+    public string FundingCluster { get; set; } = "";
+    public double CgsRatePerEftsl { get; set; }
 }

@@ -1,53 +1,68 @@
 using ProgramInsights.Models;
+using ProgramInsights.Services.Connections;
 using Snowflake.Data.Client;
 
 namespace ProgramInsights.Services;
 
 public class DataMappingService
 {
-    private readonly string _connStr;
+    private readonly ISnowflakeConnectionFactory _db;
+    private readonly ILogger<DataMappingService> _log;
 
-    public DataMappingService(IConfiguration config)
+    public DataMappingService(ISnowflakeConnectionFactory db, ILogger<DataMappingService> log)
     {
-        _connStr = config.GetConnectionString("Snowflake") ?? "";
+        _db = db;
+        _log = log;
     }
 
-    public bool IsConfigured => !string.IsNullOrEmpty(_connStr);
-
-    public async Task<(bool Ok, string Message)> TestConnectionAsync(string sourceDb)
+    /// <summary>
+    /// Probes whether the signed-in user's role can actually reach the named source
+    /// database. Now a real connectivity and grant check rather than a config check.
+    /// </summary>
+    public async Task<(bool Ok, string Message)> TestConnectionAsync(string sourceDb, CancellationToken ct = default)
     {
-        if (!IsConfigured)
-            return (false, "Snowflake connection is not configured in appsettings.");
-
         if (string.IsNullOrWhiteSpace(sourceDb))
             return (false, "Enter a database name first.");
 
-        return await Task.Run(() =>
+        SnowflakeDbConnection conn;
+        try
         {
-            try
+            conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        }
+        catch (Exception ex)
+        {
+            // Opening the connection is itself part of what this method tests, so a
+            // failure here is a result to report rather than an exception to propagate.
+            return (false, ex.Message);
+        }
+
+        await using (conn)
+        {
+            return await Task.Run(() =>
             {
-                using var conn = SnowflakeDb.OpenConnection(_connStr);
-                using var cmd = new SnowflakeDbCommand(conn)
+                try
                 {
-                    CommandText = $"SELECT COUNT(*) FROM {EscId(sourceDb)}.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
-                };
-                cmd.ExecuteScalar();
-                return (true, $"Connected to {sourceDb} successfully.");
-            }
-            catch (Exception ex)
-            {
-                return (false, ex.Message);
-            }
-        });
+                    using var cmd = new SnowflakeDbCommand(conn)
+                    {
+                        CommandText = $"SELECT COUNT(*) FROM {EscId(sourceDb)}.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'"
+                    };
+                    cmd.ExecuteScalar();
+                    return (true, $"Connected to {sourceDb} successfully.");
+                }
+                catch (Exception ex)
+                {
+                    return (false, ex.Message);
+                }
+            }, ct);
+        }
     }
 
-    public async Task<ModelConfigDto> LoadConfigAsync(Guid scenarioId)
+    public async Task<ModelConfigDto> LoadConfigAsync(Guid scenarioId, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             var dto = new ModelConfigDto { ModelId = scenarioId.ToString() };
-            if (!IsConfigured) return dto;
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using var cmd = SnowflakeDb.CreateCommand(
                 "SELECT * FROM MODEL_CONFIG WHERE MODEL_ID = :mid LIMIT 1", conn);
             SnowflakeDb.AddParam(cmd, "mid", scenarioId.ToString());
@@ -84,78 +99,51 @@ public class DataMappingService
             dto.UnitDimTable   = Col("UNIT_DIM_TABLE")   is { Length: > 0 } udt ? udt : "PRODUCTS_OBJECTS";
             dto.IncludeGlJoin  = Col("INCLUDE_GL_JOIN")?.ToUpperInvariant() != "FALSE";
             dto.GlCodeCol      = Col("GL_CODE_COL")      is { Length: > 0 } gcc ? gcc : "CODE1";
+            // Migration 4 — Upgrade_ModelConfig_FoeCodeCol.sql
+            dto.FoeCodeCol     = Col("FOE_CODE_COL") ?? "";
             return dto;
         });
     }
 
-    public async Task SaveConfigAsync(ModelConfigDto dto, Guid tenantId)
+    public async Task SaveConfigAsync(ModelConfigDto dto, Guid tenantId, CancellationToken ct = default)
     {
-        if (!IsConfigured) return;
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
             if (string.IsNullOrEmpty(dto.ConfigId))
                 dto.ConfigId = Guid.NewGuid().ToString();
 
+            // Only the connection + filter fields are required for the normalised view approach.
+            // Legacy column-mapping columns are preserved in the table but not written here.
             const string sql = @"
                 MERGE INTO MODEL_CONFIG t USING (SELECT :cfg_id AS CONFIG_ID) s
                     ON t.CONFIG_ID = s.CONFIG_ID
                 WHEN MATCHED THEN UPDATE SET
-                    SOURCE_DATABASE = :src_db, SOURCE_SCHEMA = :src_schema,
-                    FACT_TABLE = :fact_tbl, FEE_TYPE_TABLE = :ft_tbl, FEE_TYPE_COLUMN = :ft_col,
-                    COURSE_CODE_COL = :course_code_col, UNIT_CODE_COL = :unit_code_col,
-                    UNIT_DIM_TABLE = :unit_dim_tbl, INCLUDE_GL_JOIN = :incl_gl_join, GL_CODE_COL = :gl_code_col,
-                    MODEL_FILTER = :model_flt, PERIOD_FILTER = :period_flt,
-                    FEE_TYPES_DOM = :fee_dom, FEE_TYPES_INT = :fee_int, FEE_TYPES_CGS = :fee_cgs,
-                    FAC_COST_COLUMNS = :fac_cols,
-                    REV_DOM_COLUMNS = :rev_dom, REV_INT_COLUMNS = :rev_int, REV_CGS_COLUMNS = :rev_cgs,
-                    DELIVERY_HOURS_COL = :dh_col, TOTAL_EXP_COL = :exp_col,
-                    UPDATED_DATE = CURRENT_TIMESTAMP()
+                    SOURCE_DATABASE = :src_db,
+                    SOURCE_SCHEMA   = :src_schema,
+                    MODEL_FILTER    = :model_flt,
+                    PERIOD_FILTER   = :period_flt,
+                    UPDATED_DATE    = CURRENT_TIMESTAMP()
                 WHEN NOT MATCHED THEN INSERT (
                     CONFIG_ID, MODEL_ID, TENANT_ID,
-                    SOURCE_DATABASE, SOURCE_SCHEMA, FACT_TABLE, FEE_TYPE_TABLE, FEE_TYPE_COLUMN,
-                    COURSE_CODE_COL, UNIT_CODE_COL, UNIT_DIM_TABLE, INCLUDE_GL_JOIN, GL_CODE_COL,
-                    MODEL_FILTER, PERIOD_FILTER,
-                    FEE_TYPES_DOM, FEE_TYPES_INT, FEE_TYPES_CGS,
-                    FAC_COST_COLUMNS, REV_DOM_COLUMNS, REV_INT_COLUMNS, REV_CGS_COLUMNS,
-                    DELIVERY_HOURS_COL, TOTAL_EXP_COL
+                    SOURCE_DATABASE, SOURCE_SCHEMA,
+                    MODEL_FILTER, PERIOD_FILTER
                 ) VALUES (
                     :cfg_id, :model_id, :tenant_id,
-                    :src_db, :src_schema, :fact_tbl, :ft_tbl, :ft_col,
-                    :course_code_col, :unit_code_col, :unit_dim_tbl, :incl_gl_join, :gl_code_col,
-                    :model_flt, :period_flt,
-                    :fee_dom, :fee_int, :fee_cgs,
-                    :fac_cols, :rev_dom, :rev_int, :rev_cgs,
-                    :dh_col, :exp_col
+                    :src_db, :src_schema,
+                    :model_flt, :period_flt
                 )";
 
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using var cmd = SnowflakeDb.CreateCommand(sql, conn);
-            SnowflakeDb.AddParam(cmd, "cfg_id", dto.ConfigId);
-            SnowflakeDb.AddParam(cmd, "model_id", dto.ModelId);
+            SnowflakeDb.AddParam(cmd, "cfg_id",    dto.ConfigId);
+            SnowflakeDb.AddParam(cmd, "model_id",  dto.ModelId);
             SnowflakeDb.AddParam(cmd, "tenant_id", tenantId.ToString());
-            SnowflakeDb.AddParam(cmd, "src_db", dto.SourceDatabase);
+            SnowflakeDb.AddParam(cmd, "src_db",    dto.SourceDatabase);
             SnowflakeDb.AddParam(cmd, "src_schema", dto.SourceSchema);
-            SnowflakeDb.AddParam(cmd, "fact_tbl", dto.FactTable);
-            SnowflakeDb.AddParam(cmd, "ft_tbl", dto.FeeTypeTable);
-            SnowflakeDb.AddParam(cmd, "ft_col", dto.FeeTypeColumn);
-            SnowflakeDb.AddParam(cmd, "course_code_col", dto.CourseCodeCol);
-            SnowflakeDb.AddParam(cmd, "unit_code_col", dto.UnitCodeCol);
-            SnowflakeDb.AddParam(cmd, "unit_dim_tbl", dto.UnitDimTable);
-            SnowflakeDb.AddParam(cmd, "incl_gl_join", dto.IncludeGlJoin ? "TRUE" : "FALSE");
-            SnowflakeDb.AddParam(cmd, "gl_code_col", dto.GlCodeCol);
             SnowflakeDb.AddParam(cmd, "model_flt", dto.ModelFilter);
             SnowflakeDb.AddParam(cmd, "period_flt", dto.PeriodFilter);
-            SnowflakeDb.AddParam(cmd, "fee_dom", JoinPipe(dto.FeeTypesDom));
-            SnowflakeDb.AddParam(cmd, "fee_int", JoinPipe(dto.FeeTypesInt));
-            SnowflakeDb.AddParam(cmd, "fee_cgs", JoinPipe(dto.FeeTypesCgs));
-            SnowflakeDb.AddParam(cmd, "fac_cols", JoinPipe(dto.FacCostColumns));
-            SnowflakeDb.AddParam(cmd, "rev_dom", JoinPipe(dto.RevDomColumns));
-            SnowflakeDb.AddParam(cmd, "rev_int", JoinPipe(dto.RevIntColumns));
-            SnowflakeDb.AddParam(cmd, "rev_cgs", JoinPipe(dto.RevCgsColumns));
-            SnowflakeDb.AddParam(cmd, "dh_col", dto.DeliveryHoursCol);
-            SnowflakeDb.AddParam(cmd, "exp_col", dto.TotalExpCol);
             cmd.ExecuteNonQuery();
-        });
+        }, ct);
     }
 
     public async Task<List<string>> GetAvailableTablesAsync(string sourceDb, string schema = "PUBLIC")
@@ -177,10 +165,9 @@ public class DataMappingService
         try
         {
             // Step 1 — does CODE3 exist in this table?
+            await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant);
             var hasCode3 = await Task.Run(() =>
             {
-                if (!IsConfigured) return false;
-                using var conn = SnowflakeDb.OpenConnection(_connStr);
                 using var cmd = new SnowflakeDbCommand(conn)
                 {
                     CommandText = $@"
@@ -228,15 +215,40 @@ public class DataMappingService
         }
     }
 
-    public async Task<List<string>> GetAvailableModelsAsync(string sourceDb, string schema, string factTable)
-        => await QueryDistinctAsync(
-            $"SELECT DISTINCT MODEL FROM {sourceDb}.{schema}.{factTable} ORDER BY 1");
+    public async Task<bool> VerifyViewExistsAsync(string sourceDb, string schema, CancellationToken ct = default)
+    {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        return await Task.Run(() =>
+        {
+            try
+            {
+                using var cmd = new SnowflakeDbCommand(conn)
+                {
+                    CommandText =
+                        $"SELECT COUNT(*) FROM {EscId(sourceDb)}.INFORMATION_SCHEMA.VIEWS " +
+                        $"WHERE TABLE_SCHEMA = '{EscSql(schema.ToUpperInvariant())}' " +
+                        $"AND TABLE_NAME = 'VW_APP_COURSE_UNIT_SUMMARY'"
+                };
+                return Convert.ToInt32(cmd.ExecuteScalar()) > 0;
+            }
+            catch (SnowflakeDbException ex)
+            {
+                _log.LogWarning(ex,
+                    "Could not verify VW_APP_COURSE_UNIT_SUMMARY in {Db}.{Schema}", sourceDb, schema);
+                return false;
+            }
+        }, ct);
+    }
 
-    public async Task<List<string>> GetAvailablePeriodsAsync(string sourceDb, string schema, string factTable)
+    public async Task<List<string>> GetAvailableModelsAsync(string sourceDb, string schema)
+        => await QueryDistinctAsync(
+            $"SELECT DISTINCT MODEL FROM {EscId(sourceDb)}.{EscId(schema)}.VW_APP_COURSE_UNIT_SUMMARY ORDER BY 1");
+
+    public async Task<List<string>> GetAvailablePeriodsAsync(string sourceDb, string schema)
         => await QueryDistinctAsync($@"
             SELECT PERIOD_NAME FROM (
                 SELECT DISTINCT PERIOD_NAME, MAX(PERIOD_BEGIN) AS PB
-                FROM {sourceDb}.{schema}.{factTable}
+                FROM {EscId(sourceDb)}.{EscId(schema)}.VW_APP_COURSE_UNIT_SUMMARY
                 GROUP BY PERIOD_NAME
             ) ORDER BY PB DESC");
 
@@ -261,27 +273,21 @@ public class DataMappingService
               AND DATA_TYPE = 'FLOAT'
             ORDER BY ORDINAL_POSITION");
 
-    public async Task<string> CreateOrReplaceViewsAsync(ModelConfigDto dto)
+    /// <summary>
+    /// Stamps the MODEL row with the selected model filter value (ACE_MODEL).
+    /// No view SQL is generated — VW_APP_COURSE_UNIT_SUMMARY is pre-built in Snowflake.
+    /// </summary>
+    public async Task<string> RegisterModelAsync(string modelId, string modelFilter, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             try
             {
-                using var conn = SnowflakeDb.OpenConnection(_connStr);
-
-                // Always create the course view
-                ExecuteRaw(conn, BuildCourseViewSql(dto));
-
-                // Only create the unit view when a unit code column is configured
-                if (!string.IsNullOrEmpty(dto.UnitCodeCol))
-                    ExecuteRaw(conn, BuildUnitViewSql(dto));
-
-                // Stamp the MODEL row with the build time and the resolved model filter
-                // (ACE_MODEL drives the "Insights Model" display in the program details page)
                 using var cmd = SnowflakeDb.CreateCommand(
                     "UPDATE MODEL SET SAVE_DATE = CURRENT_TIMESTAMP(), ACE_MODEL = :model_flt WHERE MODEL_ID = :mid", conn);
-                SnowflakeDb.AddParam(cmd, "model_flt", dto.ModelFilter);
-                SnowflakeDb.AddParam(cmd, "mid", dto.ModelId);
+                SnowflakeDb.AddParam(cmd, "model_flt", modelFilter);
+                SnowflakeDb.AddParam(cmd, "mid", modelId);
                 cmd.ExecuteNonQuery();
                 return "";
             }
@@ -289,7 +295,7 @@ public class DataMappingService
             {
                 return ex.Message;
             }
-        });
+        }, ct);
     }
 
     public string BuildCourseViewSql(ModelConfigDto dto)
@@ -312,9 +318,9 @@ SELECT
     SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesInt)}) THEN f.E_F_T_S_L ELSE 0 END) AS EFTSL_Int,
     SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesCgs)}) THEN f.E_F_T_S_L ELSE 0 END) AS EFTSL_CGS,
     SUM(f.{dto.DeliveryHoursCol}) AS Delivery_Hours,
-    SUM({ColSum(dto.RevDomColumns)}) AS RevDom,
-    SUM({ColSum(dto.RevIntColumns)}) AS RevInt,
-    SUM({ColSum(dto.RevCgsColumns)}) AS RevCGS
+    SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesDom)}) THEN {ColSum(dto.RevDomColumns)} ELSE 0 END) AS RevDom,
+    SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesInt)}) THEN {ColSum(dto.RevIntColumns)} ELSE 0 END) AS RevInt,
+    SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesCgs)}) THEN {ColSum(dto.RevCgsColumns)} ELSE 0 END) AS RevCGS
 FROM {src}.{dto.FactTable} f
 JOIN {src}.{dto.FeeTypeTable} c ON f.{dto.CourseCodeCol} = c.CODE AND f.{courseModCol} = c.MODULE_CODE{glJoin}
 WHERE f.MODEL = '{EscSql(dto.ModelFilter)}'
@@ -331,21 +337,24 @@ GROUP BY f.MODELFK, c.COURSE_SCHOOL, c.COURSE_CAREER, c.COURSE_NAME";
         var glJoin = dto.IncludeGlJoin && !string.IsNullOrEmpty(dto.GlCodeCol)
             ? $"\nJOIN {src}.GL_OBJECTS g ON f.{dto.GlCodeCol} = g.CODE AND f.{ModuleCol(dto.GlCodeCol)} = g.MODULE_CODE"
             : "";
+        var foeCol = !string.IsNullOrWhiteSpace(dto.FoeCodeCol)
+            ? $"\n    MAX(p.{dto.FoeCodeCol}) AS FOE_Code,"
+            : "\n    NULL AS FOE_Code,";
         return $@"CREATE OR REPLACE VIEW V_UNIT_VALUES_{SafeId(dto.ModelId)} AS
 SELECT
     f.MODELFK AS Model_ID,
     p.PRODUCT_SCHOOL AS School,
     c.COURSE_CAREER AS Career,
-    p.UNIT_NAME AS Unit_Name,
+    p.UNIT_NAME AS Unit_Name,{foeCol}
     SUM({facExpr}) AS Exp_Fac,
     SUM(f.{dto.TotalExpCol} - ({facExpr})) AS Exp_NonFac,
     SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesDom)}) THEN f.E_F_T_S_L ELSE 0 END) AS EFTSL_Dom,
     SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesInt)}) THEN f.E_F_T_S_L ELSE 0 END) AS EFTSL_Int,
     SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesCgs)}) THEN f.E_F_T_S_L ELSE 0 END) AS EFTSL_CGS,
     SUM(f.{dto.DeliveryHoursCol}) AS Delivery_Hours,
-    SUM({ColSum(dto.RevDomColumns)}) AS RevDom,
-    SUM({ColSum(dto.RevIntColumns)}) AS RevInt,
-    SUM({ColSum(dto.RevCgsColumns)}) AS RevCGS
+    SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesDom)}) THEN {ColSum(dto.RevDomColumns)} ELSE 0 END) AS RevDom,
+    SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesInt)}) THEN {ColSum(dto.RevIntColumns)} ELSE 0 END) AS RevInt,
+    SUM(CASE WHEN c.{dto.FeeTypeColumn} IN ({InList(dto.FeeTypesCgs)}) THEN {ColSum(dto.RevCgsColumns)} ELSE 0 END) AS RevCGS
 FROM {src}.{dto.FactTable} f
 JOIN {src}.{dto.UnitDimTable} p ON f.{dto.UnitCodeCol} = p.CODE AND f.{unitModCol} = p.MODULE_CODE
 JOIN {src}.{dto.FeeTypeTable} c ON f.{dto.CourseCodeCol} = c.CODE AND f.{courseModCol} = c.MODULE_CODE{glJoin}
@@ -354,19 +363,18 @@ WHERE f.MODEL = '{EscSql(dto.ModelFilter)}'
 GROUP BY f.MODELFK, p.PRODUCT_SCHOOL, c.COURSE_CAREER, p.UNIT_NAME";
     }
 
-    private async Task<List<string>> QueryDistinctAsync(string sql)
+    private async Task<List<string>> QueryDistinctAsync(string sql, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             var result = new List<string>();
-            if (!IsConfigured) return result;
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using var cmd = new SnowflakeDbCommand(conn) { CommandText = sql };
             using var rdr = cmd.ExecuteReader();
             while (rdr.Read())
                 if (!rdr.IsDBNull(0)) result.Add(rdr.GetString(0));
             return result;
-        });
+        }, ct);
     }
 
     private static void ExecuteRaw(SnowflakeDbConnection conn, string sql)

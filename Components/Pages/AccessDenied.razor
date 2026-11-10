@@ -1,0 +1,30 @@
+@page "/access-denied"
+@attribute [AllowAnonymous]
+
+<PageTitle>Access denied — Program Insights</PageTitle>
+
+<div class="content-container">
+    <div class="wizard-header">
+        <h1 class="wizard-title">Access denied</h1>
+        <p class="wizard-subtitle">You signed in successfully, but your account isn't set up for Program Insights yet.</p>
+    </div>
+
+    <div class="details-card" style="max-width:640px;">
+        <div class="details-card-title">
+            <i class="fa-solid fa-circle-exclamation"></i> What to do
+        </div>
+        <p style="font-size:13px;color:#374151;">
+            Ask support to confirm all three of the following for your account:
+        </p>
+        <ul style="font-size:13px;color:#374151;line-height:1.9;">
+            <li>You have an active entry in the Program Insights user list.</li>
+            <li>You have a Snowflake user with a default role assigned.</li>
+            <li>That role is mapped to a client database.</li>
+        </ul>
+        <div class="tab-footer-actions">
+            <a class="button2" href="https://pilbaragroup.atlassian.net/servicedesk/customer/portals" target="_blank">
+                <i class="fa-solid fa-headset me-2"></i>Contact support
+            </a>
+        </div>
+    </div>
+</div>

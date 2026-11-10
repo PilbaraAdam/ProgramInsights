@@ -4,15 +4,18 @@ using System.Text.RegularExpressions;
 
 namespace ProgramInsights.Services;
 
+/// <summary>
+/// SQL helpers shared by the data services. Pure translation and parameter plumbing —
+/// it deliberately does NOT open connections.
+///
+/// Connections come from <see cref="Connections.ISnowflakeConnectionFactory"/>, because
+/// under per-user OAuth every connection needs a token acquired at that moment and a
+/// database resolved from the signed-in user's Snowflake role. A static
+/// OpenConnection(connectionString) has no way to do either, so it was removed rather
+/// than left as a trap.
+/// </summary>
 public static class SnowflakeDb
 {
-    public static SnowflakeDbConnection OpenConnection(string connStr)
-    {
-        var conn = new SnowflakeDbConnection { ConnectionString = connStr };
-        conn.Open();
-        return conn;
-    }
-
     public static SnowflakeDbCommand CreateCommand(string sql, SnowflakeDbConnection conn)
     {
         var cmd = new SnowflakeDbCommand(conn)

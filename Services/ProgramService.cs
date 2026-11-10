@@ -1,4 +1,5 @@
 using ProgramInsights.Models;
+using ProgramInsights.Services.Connections;
 using Snowflake.Data.Client;
 using System.Data;
 
@@ -6,28 +7,33 @@ namespace ProgramInsights.Services;
 
 public class ProgramService
 {
-    private readonly string _connStr;
+    private readonly ISnowflakeConnectionFactory _db;
+    private readonly ILogger<ProgramService> _log;
 
-    public ProgramService(IConfiguration config)
+    public ProgramService(ISnowflakeConnectionFactory db, ILogger<ProgramService> log)
     {
-        _connStr = config.GetConnectionString("Snowflake") ?? "";
+        _db = db;
+        _log = log;
     }
 
-    public bool IsConfigured => !string.IsNullOrEmpty(_connStr);
-
-    public async Task<ProgramDetailsDto?> GetDetailsAsync(Guid programId)
+    public async Task<ProgramDetailsDto?> GetDetailsAsync(Guid programId, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
-            if (!IsConfigured) return null;
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
 
             ProgramDetailsDto? details = null;
             const string programSql =
                 "SELECT p.PROGRAM_ID, p.MODEL_ID, p.NAME, p.DESCRIPTION, p.SAVE_DATE, p.START_YEAR, " +
                 "p.REVCGS_CLUSTER, p.REVCGS_SELECT, p.REVCGS_CUSTOM, p.REVDOM_SELECT, p.REVDOM_CUSTOM, " +
                 "p.REVINT_SELECT, p.REVINT_CUSTOM, p.CPH_SELECT, p.CPH_CUSTOM, p.NFC_SELECT, p.NFC_CUSTOM, " +
-                "p.PROFILE, p.SCHOOL_SELECT, p.CAREER_SELECT, " +
+                "p.PROFILE, p.SCHOOL_SELECT, p.CAREER_SELECT, COALESCE(p.REVCGS_YEAR, 0) AS REVCGS_YEAR, " +
+                "COALESCE(p.OWNER, '') AS OWNER, " +
+                "COALESCE(p.STATUS, 'Active') AS STATUS, " +
+                "COALESCE(p.TAGS, '') AS TAGS, " +
+                "COALESCE(p.BM_DEGREE_LEVEL, '') AS BM_DEGREE_LEVEL, " +
+                "COALESCE(p.BM_FOE, '') AS BM_FOE, " +
+                "COALESCE(p.BM_PERIOD_NAME, '') AS BM_PERIOD_NAME, " +
                 "m.NAME AS MODEL_NAME, m.ACE_MODEL, m.SAVE_DATE AS MODEL_SAVE_DATE, m.ACE_DBNAME " +
                 "FROM PROGRAM p LEFT JOIN MODEL m ON p.MODEL_ID = m.MODEL_ID " +
                 "WHERE p.PROGRAM_ID = :ProgramID";
@@ -65,17 +71,31 @@ public class ProgramService
                     ScenarioName = GetString(row, "MODEL_NAME"),
                     InsightsModel = GetString(row, "ACE_MODEL"),
                     ScenarioSaveDate = GetDate(row, "MODEL_SAVE_DATE"),
-                    SourceDb = GetString(row, "ACE_DBNAME")
+                    SourceDb = GetString(row, "ACE_DBNAME"),
+                    CgsClusterYear = GetInt(row, "REVCGS_YEAR"),
+                    Owner = GetString(row, "OWNER"),
+                    Status = GetString(row, "STATUS", "Active"),
+                    Tags = GetString(row, "TAGS"),
+                    BmDegreeLevel = GetString(row, "BM_DEGREE_LEVEL"),
+                    BmFoe = GetString(row, "BM_FOE"),
+                    BmPeriodName = GetString(row, "BM_PERIOD_NAME")
                 };
             }
 
             details.Settings = GetSettings(conn, programId);
             details.Units = GetUnits(conn, programId);
             details.Profiles = GetProfiles(conn, details.ScenarioId);
-            details.UnitOptions = GetUnitOptions(conn, details.ScenarioId, details.SourceDb);
-            details.UnitValues = GetUnitValues(conn, details.ScenarioId, details.SourceDb);
-            details.ModelValues = GetModelValues(conn, details.ScenarioId, details.SourceDb);
-            details.CgsClusters = GetConstants(conn, "CGS");
+            var modelCfg = LoadModelConfig(conn, details.ScenarioId);
+            details.UnitOptions = GetUnitOptions(conn, modelCfg);
+            details.UnitValues  = GetUnitValues(conn, modelCfg);
+            details.ModelValues = GetModelValues(conn, modelCfg);
+            details.CgsClusterYearOptions = GetHelpAllocationYears(conn);
+            if (details.CgsClusterYearOptions.Count > 0)
+            {
+                if (details.CgsClusterYear == 0)
+                    details.CgsClusterYear = details.CgsClusterYearOptions[0];
+                details.FoeCodeOptions = GetFoeCodeOptions(conn, details.CgsClusterYear);
+            }
 
             if (details.Settings.Count == 0)
             {
@@ -83,16 +103,15 @@ public class ProgramService
             }
 
             return details;
-        });
+        }, ct);
     }
 
-    public async Task<List<ProgramDto>> GetByScenarioAsync(Guid scenarioId)
+    public async Task<List<ProgramDto>> GetByScenarioAsync(Guid scenarioId, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             var result = new List<ProgramDto>();
-            if (!IsConfigured) return result;
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
 
             const string sql = @"
                 SELECT
@@ -136,15 +155,15 @@ public class ProgramService
                     Convert.ToInt32(row["YEAR_COUNT"])));
             }
             return result;
-        });
+        }, ct);
     }
 
-    public async Task<Guid> CreateAsync(Guid scenarioId, string name, string description, int startYear, int numberOfYears)
+    public async Task<Guid> CreateAsync(Guid scenarioId, string name, string description, int startYear, int numberOfYears, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             var programId = Guid.NewGuid();
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
 
             string profileName = "Standard";
             using (var cmd = SnowflakeDb.CreateCommand(
@@ -194,14 +213,14 @@ public class ProgramService
             }
 
             return programId;
-        });
+        }, ct);
     }
 
-    public async Task DeleteAsync(Guid scenarioId, Guid programId)
+    public async Task DeleteAsync(Guid scenarioId, Guid programId, CancellationToken ct = default)
     {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             using (var cmd = SnowflakeDb.CreateCommand(
                 "DELETE FROM PROGRAM WHERE MODEL_ID = :Model AND PROGRAM_ID = :ProgramID", conn))
             {
@@ -215,25 +234,28 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "ProgramID", programId.ToString());
                 cmd.ExecuteNonQuery();
             }
-        });
+        }, ct);
     }
 
-    public async Task SaveDetailsAsync(ProgramDetailsDto details)
+    public async Task SaveDetailsAsync(ProgramDetailsDto details, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(details.Name)) throw new InvalidOperationException("Program name is required.");
+
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
-            if (!IsConfigured) throw new InvalidOperationException("Snowflake connection not configured.");
-            if (string.IsNullOrWhiteSpace(details.Name)) throw new InvalidOperationException("Program name is required.");
-
-            using var conn = SnowflakeDb.OpenConnection(_connStr);
             const string updateSql =
                 "UPDATE PROGRAM SET NAME = :Name, DESCRIPTION = :Description, START_YEAR = :StartYear, " +
                 "REVCGS_CLUSTER = :RevCgsCluster, REVCGS_SELECT = :RevCgsSelect, REVCGS_CUSTOM = :RevCgsCustom, " +
+                "REVCGS_YEAR = :RevCgsYear, " +
                 "REVDOM_SELECT = :RevDomSelect, REVDOM_CUSTOM = :RevDomCustom, " +
                 "REVINT_SELECT = :RevIntSelect, REVINT_CUSTOM = :RevIntCustom, " +
                 "CPH_SELECT = :CphSelect, CPH_CUSTOM = :CphCustom, NFC_SELECT = :NfcSelect, NFC_CUSTOM = :NfcCustom, " +
                 "SCHOOL_SELECT = :SchoolSelect, CAREER_SELECT = :CareerSelect, " +
-                "PROFILE = :Profile, SAVE_DATE = CURRENT_TIMESTAMP() WHERE PROGRAM_ID = :ProgramID";
+                "PROFILE = :Profile, " +
+                "OWNER = :Owner, STATUS = :Status, TAGS = :Tags, " +
+                "BM_DEGREE_LEVEL = :BmDegreeLevel, BM_FOE = :BmFoe, BM_PERIOD_NAME = :BmPeriodName, " +
+                "SAVE_DATE = CURRENT_TIMESTAMP() WHERE PROGRAM_ID = :ProgramID";
 
             using (var cmd = SnowflakeDb.CreateCommand(updateSql, conn))
             {
@@ -243,6 +265,7 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "RevCgsCluster", details.RevCgsCluster);
                 SnowflakeDb.AddParam(cmd, "RevCgsSelect", details.RevCgsSelect);
                 SnowflakeDb.AddParam(cmd, "RevCgsCustom", details.RevCgsCustom);
+                SnowflakeDb.AddParam(cmd, "RevCgsYear", details.CgsClusterYear);
                 SnowflakeDb.AddParam(cmd, "RevDomSelect", details.RevDomSelect);
                 SnowflakeDb.AddParam(cmd, "RevDomCustom", details.RevDomCustom);
                 SnowflakeDb.AddParam(cmd, "RevIntSelect", details.RevIntSelect);
@@ -254,6 +277,12 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "SchoolSelect", details.SchoolSelect);
                 SnowflakeDb.AddParam(cmd, "CareerSelect", details.CareerSelect);
                 SnowflakeDb.AddParam(cmd, "Profile", details.Profile);
+                SnowflakeDb.AddParam(cmd, "Owner", details.Owner);
+                SnowflakeDb.AddParam(cmd, "Status", details.Status);
+                SnowflakeDb.AddParam(cmd, "Tags", details.Tags);
+                SnowflakeDb.AddParam(cmd, "BmDegreeLevel", details.BmDegreeLevel);
+                SnowflakeDb.AddParam(cmd, "BmFoe", details.BmFoe);
+                SnowflakeDb.AddParam(cmd, "BmPeriodName", details.BmPeriodName);
                 SnowflakeDb.AddParam(cmd, "ProgramID", details.Id.ToString());
                 cmd.ExecuteNonQuery();
             }
@@ -281,9 +310,11 @@ public class ProgramService
             Execute(conn, "DELETE FROM UNITS WHERE PROGRAM_ID = :ProgramID", ("ProgramID", details.Id.ToString()));
             const string unitSql =
                 "INSERT INTO UNITS (PROGRAM_ID, UNIT, PROFILE, MODEL_ID, PROGRAM_YEAR, " +
-                "CUSTOM_TUT_SIZE, CUSTOM_LECT_HOURS, CUSTOM_TUT_HOURS, CUSTOM_PREP_HOURS, CUSTOM_ADMIN_HOURS, CUSTOM_STUDENT_HOURS) " +
+                "CUSTOM_TUT_SIZE, CUSTOM_LECT_HOURS, CUSTOM_TUT_HOURS, CUSTOM_PREP_HOURS, CUSTOM_ADMIN_HOURS, CUSTOM_STUDENT_HOURS, " +
+                "FOE_CODE_DETAILED) " +
                 "VALUES (:ProgramID, :Unit, :Profile, :ModelID, :ProgramYear, " +
-                ":CustomTutSize, :CustomLectHours, :CustomTutHours, :CustomPrepHours, :CustomAdminHours, :CustomStudentHours)";
+                ":CustomTutSize, :CustomLectHours, :CustomTutHours, :CustomPrepHours, :CustomAdminHours, :CustomStudentHours, " +
+                ":FoeCodeDetailed)";
             foreach (var unit in details.Units.Where(u => !string.IsNullOrWhiteSpace(u.Unit) && !string.IsNullOrWhiteSpace(u.Profile)))
             {
                 using var cmd = SnowflakeDb.CreateCommand(unitSql, conn);
@@ -292,6 +323,7 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "Profile", unit.Profile);
                 SnowflakeDb.AddParam(cmd, "ModelID", details.ScenarioId.ToString());
                 SnowflakeDb.AddParam(cmd, "ProgramYear", unit.ProgramYear);
+                SnowflakeDb.AddParam(cmd, "FoeCodeDetailed", string.IsNullOrWhiteSpace(unit.FoeCodeDetailed) ? (object)DBNull.Value : unit.FoeCodeDetailed);
                 SnowflakeDb.AddParam(cmd, "CustomTutSize", (object?)unit.CustomTutSize ?? DBNull.Value);
                 SnowflakeDb.AddParam(cmd, "CustomLectHours", (object?)unit.CustomLectHours ?? DBNull.Value);
                 SnowflakeDb.AddParam(cmd, "CustomTutHours", (object?)unit.CustomTutHours ?? DBNull.Value);
@@ -300,7 +332,7 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "CustomStudentHours", (object?)unit.CustomStudentHours ?? DBNull.Value);
                 cmd.ExecuteNonQuery();
             }
-        });
+        }, ct);
     }
 
     private static List<ProgramYearSettingDto> GetSettings(SnowflakeDbConnection conn, Guid programId)
@@ -331,7 +363,8 @@ public class ProgramService
         var result = new List<ProgramUnitDto>();
         using var cmd = SnowflakeDb.CreateCommand(
             "SELECT UNIT, PROFILE, COALESCE(PROGRAM_YEAR, 1) AS PROGRAM_YEAR, " +
-            "CUSTOM_TUT_SIZE, CUSTOM_LECT_HOURS, CUSTOM_TUT_HOURS, CUSTOM_PREP_HOURS, CUSTOM_ADMIN_HOURS, CUSTOM_STUDENT_HOURS " +
+            "CUSTOM_TUT_SIZE, CUSTOM_LECT_HOURS, CUSTOM_TUT_HOURS, CUSTOM_PREP_HOURS, CUSTOM_ADMIN_HOURS, CUSTOM_STUDENT_HOURS, " +
+            "COALESCE(FOE_CODE_DETAILED, '') AS FOE_CODE_DETAILED " +
             "FROM UNITS WHERE PROGRAM_ID = :ProgramID ORDER BY PROGRAM_YEAR, UNIT", conn);
         SnowflakeDb.AddParam(cmd, "ProgramID", programId.ToString());
         var dt = SnowflakeDb.Fill(cmd);
@@ -342,6 +375,7 @@ public class ProgramService
                 Unit = GetString(row, "UNIT"),
                 Profile = GetString(row, "PROFILE"),
                 ProgramYear = GetInt(row, "PROGRAM_YEAR", 1),
+                FoeCodeDetailed = GetString(row, "FOE_CODE_DETAILED"),
                 CustomTutSize = GetDoubleNullable(row, "CUSTOM_TUT_SIZE"),
                 CustomLectHours = GetDoubleNullable(row, "CUSTOM_LECT_HOURS"),
                 CustomTutHours = GetDoubleNullable(row, "CUSTOM_TUT_HOURS"),
@@ -376,35 +410,107 @@ public class ProgramService
         return result;
     }
 
-    private static List<ProgramUnitOptionDto> GetUnitOptions(SnowflakeDbConnection conn, Guid scenarioId, string sourceDb)
+    private sealed record ModelCfg(
+        string SourceDb,
+        string SourceSchema,
+        string ModelFilter,
+        string PeriodFilter,
+        List<string> FeeTypesDom,
+        List<string> FeeTypesInt,
+        List<string> FeeTypesCgs);
+
+    /// <summary>
+    /// Loads the minimal config fields needed to locate VW_APP_COURSE_UNIT_SUMMARY
+    /// for a given scenario.  Returns empty strings (= no data) if no config is saved yet.
+    /// </summary>
+    private static ModelCfg LoadModelConfig(SnowflakeDbConnection conn, Guid scenarioId)
     {
-        var result = new List<ProgramUnitOptionDto>();
-        if (string.IsNullOrWhiteSpace(sourceDb)) return result;
+        static List<string> SplitPipe(string? s)
+            => string.IsNullOrWhiteSpace(s) ? new() : s.Split('|').Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+
+        var empty = new ModelCfg("", "PUBLIC", "", "", new(), new(), new());
         try
         {
-            var view = $"V_UNIT_VALUES_{SafeId(scenarioId)}";
             using var cmd = SnowflakeDb.CreateCommand(
-                $"SELECT DISTINCT Unit_Name AS UNIT_NAME, School AS SCHOOL FROM {view} ORDER BY Unit_Name", conn);
+                "SELECT SOURCE_DATABASE, SOURCE_SCHEMA, MODEL_FILTER, PERIOD_FILTER, " +
+                "FEE_TYPES_DOM, FEE_TYPES_INT, FEE_TYPES_CGS " +
+                "FROM MODEL_CONFIG WHERE MODEL_ID = :mid LIMIT 1", conn);
+            SnowflakeDb.AddParam(cmd, "mid", scenarioId.ToString());
+            var dt = SnowflakeDb.Fill(cmd);
+            if (dt.Rows.Count == 0) return empty;
+            var row = dt.Rows[0];
+
+            string? Col(string name) => dt.Columns.Contains(name) ? row[name]?.ToString() : null;
+
+            return new ModelCfg(
+                GetString(row, "SOURCE_DATABASE"),
+                GetString(row, "SOURCE_SCHEMA", "PUBLIC"),
+                GetString(row, "MODEL_FILTER"),
+                GetString(row, "PERIOD_FILTER"),
+                SplitPipe(Col("FEE_TYPES_DOM")),
+                SplitPipe(Col("FEE_TYPES_INT")),
+                SplitPipe(Col("FEE_TYPES_CGS"))
+            );
+        }
+        catch { return empty; }
+    }
+
+    private List<ProgramUnitOptionDto> GetUnitOptions(
+        SnowflakeDbConnection conn,
+        ModelCfg cfg)
+    {
+        var result = new List<ProgramUnitOptionDto>();
+        if (string.IsNullOrWhiteSpace(cfg.SourceDb)) return result;
+        try
+        {
+            var view = $"{cfg.SourceDb}.{cfg.SourceSchema}.VW_APP_COURSE_UNIT_SUMMARY";
+            using var cmd = SnowflakeDb.CreateCommand(
+                $"SELECT DISTINCT UNIT_NAME, FACULTY_NAME AS SCHOOL, " +
+                $"COALESCE(FOE_DETAILED_6_DIGIT, '') AS FOE_CODE " +
+                $"FROM {view} " +
+                $"WHERE MODEL = :model AND PERIOD_NAME = :period " +
+                $"ORDER BY UNIT_NAME", conn);
+            SnowflakeDb.AddParam(cmd, "model", cfg.ModelFilter);
+            SnowflakeDb.AddParam(cmd, "period", cfg.PeriodFilter);
             var dt = SnowflakeDb.Fill(cmd);
             foreach (DataRow row in dt.Rows)
-                result.Add(new ProgramUnitOptionDto { Name = GetString(row, "UNIT_NAME"), School = GetString(row, "SCHOOL") });
+                result.Add(new ProgramUnitOptionDto
+                {
+                    Name = GetString(row, "UNIT_NAME"),
+                    School = GetString(row, "SCHOOL"),
+                    FoeCodeDetailed = GetString(row, "FOE_CODE")
+                });
         }
-        catch { /* view not yet created */ }
+        catch (SnowflakeDbException ex)
+        {
+            _log.LogWarning(ex, "Unit options unavailable - the scenario view may not be built yet");
+        }
         return result;
     }
 
-    private static List<ProgramUnitValueDto> GetUnitValues(SnowflakeDbConnection conn, Guid scenarioId, string sourceDb)
+    private List<ProgramUnitValueDto> GetUnitValues(
+        SnowflakeDbConnection conn,
+        ModelCfg cfg)
     {
         var result = new List<ProgramUnitValueDto>();
-        if (string.IsNullOrWhiteSpace(sourceDb)) return result;
+        if (string.IsNullOrWhiteSpace(cfg.SourceDb)) return result;
         try
         {
-            var view = $"V_UNIT_VALUES_{SafeId(scenarioId)}";
+            var view = $"{cfg.SourceDb}.{cfg.SourceSchema}.VW_APP_COURSE_UNIT_SUMMARY";
             using var cmd = SnowflakeDb.CreateCommand(
-                $"SELECT Unit_Name AS UNIT_NAME, Exp_Fac AS EXP_FAC, Exp_NonFac AS EXP_NONFAC, " +
-                $"EFTSL_Dom AS EFTSL_DOM, EFTSL_Int AS EFTSL_INT, EFTSL_CGS, " +
-                $"Delivery_Hours AS DELIVERY_HOURS, RevDom AS REVDOM, RevInt AS REVINT, RevCGS AS REVCGS " +
-                $"FROM {view}", conn);
+                $"SELECT UNIT_NAME, " +
+                $"SUM(FACULTY_EXPENSE) AS EXP_FAC, SUM(NON_FACULTY_EXPENSE) AS EXP_NONFAC, " +
+                $"SUM({FeeTypeCase(cfg.FeeTypesDom)}) AS EFTSL_DOM, " +
+                $"SUM({FeeTypeCase(cfg.FeeTypesInt)}) AS EFTSL_INT, " +
+                $"SUM({FeeTypeCase(cfg.FeeTypesCgs)}) AS EFTSL_CGS, " +
+                $"SUM(EFTSL) AS EFTSL_TOTAL, " +
+                $"SUM(DELIVERY_HOURS) AS DELIVERY_HOURS, " +
+                $"SUM(REVENUE_DOM) AS REVDOM, SUM(REVENUE_INT) AS REVINT, SUM(REVENUE_CGS) AS REVCGS " +
+                $"FROM {view} " +
+                $"WHERE MODEL = :model AND PERIOD_NAME = :period " +
+                $"GROUP BY UNIT_NAME", conn);
+            SnowflakeDb.AddParam(cmd, "model", cfg.ModelFilter);
+            SnowflakeDb.AddParam(cmd, "period", cfg.PeriodFilter);
             var dt = SnowflakeDb.Fill(cmd);
             foreach (DataRow row in dt.Rows)
                 result.Add(new ProgramUnitValueDto
@@ -415,29 +521,43 @@ public class ProgramService
                     DomesticEftsl = GetDouble(row, "EFTSL_DOM"),
                     InternationalEftsl = GetDouble(row, "EFTSL_INT"),
                     CgsEftsl = GetDouble(row, "EFTSL_CGS"),
+                    TotalEftsl = GetDouble(row, "EFTSL_TOTAL"),
                     DomesticRevenue = GetDouble(row, "REVDOM"),
                     InternationalRevenue = GetDouble(row, "REVINT"),
                     CgsRevenue = GetDouble(row, "REVCGS"),
                     DeliveryHours = GetDouble(row, "DELIVERY_HOURS")
                 });
         }
-        catch { /* view not yet created */ }
+        catch (SnowflakeDbException ex)
+        {
+            _log.LogWarning(ex, "Unit values unavailable - the scenario view may not be built yet");
+        }
         return result;
     }
 
-    private static List<ModelValueDto> GetModelValues(SnowflakeDbConnection conn, Guid scenarioId, string sourceDb)
+    private List<ModelValueDto> GetModelValues(
+        SnowflakeDbConnection conn,
+        ModelCfg cfg)
     {
         var result = new List<ModelValueDto>();
-        if (string.IsNullOrWhiteSpace(sourceDb)) return result;
+        if (string.IsNullOrWhiteSpace(cfg.SourceDb)) return result;
         try
         {
-            var view = $"V_COURSE_VALUES_{SafeId(scenarioId)}";
+            var view = $"{cfg.SourceDb}.{cfg.SourceSchema}.VW_APP_COURSE_UNIT_SUMMARY";
             using var cmd = SnowflakeDb.CreateCommand(
-                $"SELECT School AS SCHOOL, Career AS CAREER, Course_Name AS COURSE_NAME, " +
-                $"Exp_Fac AS EXP_FAC, Exp_NonFac AS EXP_NONFAC, " +
-                $"EFTSL_Dom AS EFTSL_DOM, EFTSL_Int AS EFTSL_INT, EFTSL_CGS, " +
-                $"Delivery_Hours AS DELIVERY_HOURS, RevDom AS REVDOM, RevInt AS REVINT, RevCGS AS REVCGS " +
-                $"FROM {view}", conn);
+                $"SELECT FACULTY_NAME AS SCHOOL, DEGREE_LEVEL AS CAREER, COURSE_NAME, " +
+                $"SUM(FACULTY_EXPENSE) AS EXP_FAC, SUM(NON_FACULTY_EXPENSE) AS EXP_NONFAC, " +
+                $"SUM({FeeTypeCase(cfg.FeeTypesDom)}) AS EFTSL_DOM, " +
+                $"SUM({FeeTypeCase(cfg.FeeTypesInt)}) AS EFTSL_INT, " +
+                $"SUM({FeeTypeCase(cfg.FeeTypesCgs)}) AS EFTSL_CGS, " +
+                $"SUM(EFTSL) AS EFTSL_TOTAL, " +
+                $"SUM(DELIVERY_HOURS) AS DELIVERY_HOURS, " +
+                $"SUM(REVENUE_DOM) AS REVDOM, SUM(REVENUE_INT) AS REVINT, SUM(REVENUE_CGS) AS REVCGS " +
+                $"FROM {view} " +
+                $"WHERE MODEL = :model AND PERIOD_NAME = :period " +
+                $"GROUP BY FACULTY_NAME, DEGREE_LEVEL, COURSE_NAME", conn);
+            SnowflakeDb.AddParam(cmd, "model", cfg.ModelFilter);
+            SnowflakeDb.AddParam(cmd, "period", cfg.PeriodFilter);
             var dt = SnowflakeDb.Fill(cmd);
             foreach (DataRow row in dt.Rows)
                 result.Add(new ModelValueDto
@@ -450,22 +570,93 @@ public class ProgramService
                     DomesticEftsl = GetDouble(row, "EFTSL_DOM"),
                     InternationalEftsl = GetDouble(row, "EFTSL_INT"),
                     CgsEftsl = GetDouble(row, "EFTSL_CGS"),
+                    TotalEftsl = GetDouble(row, "EFTSL_TOTAL"),
                     DomesticRevenue = GetDouble(row, "REVDOM"),
                     InternationalRevenue = GetDouble(row, "REVINT"),
                     CgsRevenue = GetDouble(row, "REVCGS"),
                     DeliveryHours = GetDouble(row, "DELIVERY_HOURS")
                 });
         }
-        catch { /* view not yet created */ }
+        catch (SnowflakeDbException ex)
+        {
+            _log.LogWarning(ex, "Model values unavailable - the scenario view may not be built yet");
+        }
         return result;
     }
 
-    private static string SafeId(Guid id) => id.ToString().Replace("-", "_");
+    private static string FeeTypeCase(List<string> feeTypes)
+    {
+        if (feeTypes.Count == 0) return "0";
+        var inList = string.Join(",", feeTypes.Select(f => $"'{f.Replace("'", "''")}'"));
+        return $"CASE WHEN FEE_TYPE IN ({inList}) THEN EFTSL ELSE 0 END";
+    }
+
+    public async Task<List<FoeCodeOptionDto>> GetFoeCodeOptionsForYearAsync(int year, CancellationToken ct = default)
+    {
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        return await Task.Run(() =>
+        {
+            return GetFoeCodeOptions(conn, year);
+        }, ct);
+    }
+
+    private List<int> GetHelpAllocationYears(SnowflakeDbConnection conn)
+    {
+        var result = new List<int>();
+        try
+        {
+            using var cmd = SnowflakeDb.CreateCommand(
+                "SELECT DISTINCT YEAR FROM AU_HIGHER_ED_FUNDING.CURATED.HELP_ALLOCATIONS ORDER BY YEAR DESC", conn);
+            var dt = SnowflakeDb.Fill(cmd);
+            foreach (DataRow row in dt.Rows)
+                result.Add(GetInt(row, "YEAR"));
+        }
+        catch (SnowflakeDbException ex)
+        {
+            _log.LogWarning(ex, "HELP allocation years unavailable - check SELECT on AU_HIGHER_ED_FUNDING.CURATED.HELP_ALLOCATIONS");
+        }
+        return result;
+    }
+
+    private List<FoeCodeOptionDto> GetFoeCodeOptions(SnowflakeDbConnection conn, int year)
+    {
+        var result = new List<FoeCodeOptionDto>();
+        if (year == 0) return result;
+        try
+        {
+            using var cmd = SnowflakeDb.CreateCommand(
+                "SELECT FOE_CODE_DETAILED, FOE_TITLE_DETAILED, " +
+                "FOE_CODE_NARROW, FOE_TITLE_NARROW, FOE_CODE_BROAD, FOE_TITLE_BROAD, " +
+                "FUNDING_CLUSTER, " +
+                "(MAX_STUDENT_CONTRIBUTION + COMMONWEALTH_CONTRIBUTION) AS TOTAL_RATE " +
+                "FROM AU_HIGHER_ED_FUNDING.CURATED.HELP_ALLOCATIONS " +
+                "WHERE YEAR = :Year ORDER BY FOE_CODE_DETAILED", conn);
+            SnowflakeDb.AddParam(cmd, "Year", year);
+            var dt = SnowflakeDb.Fill(cmd);
+            foreach (DataRow row in dt.Rows)
+                result.Add(new FoeCodeOptionDto
+                {
+                    FoeCodeDetailed = GetString(row, "FOE_CODE_DETAILED"),
+                    FoeTitleDetailed = GetString(row, "FOE_TITLE_DETAILED"),
+                    FoeCodeNarrow = GetString(row, "FOE_CODE_NARROW"),
+                    FoeTitleNarrow = GetString(row, "FOE_TITLE_NARROW"),
+                    FoeCodeBroad = GetString(row, "FOE_CODE_BROAD"),
+                    FoeTitleBroad = GetString(row, "FOE_TITLE_BROAD"),
+                    FundingCluster = GetString(row, "FUNDING_CLUSTER"),
+                    CgsRatePerEftsl = GetDouble(row, "TOTAL_RATE")
+                });
+        }
+        catch (SnowflakeDbException ex)
+        {
+            _log.LogWarning(ex, "FOE code options unavailable - check SELECT on AU_HIGHER_ED_FUNDING.CURATED.HELP_ALLOCATIONS");
+        }
+        return result;
+    }
 
     private static List<ConstantOptionDto> GetConstants(SnowflakeDbConnection conn, string type)
     {
         var result = new List<ConstantOptionDto>();
-        using var cmd = SnowflakeDb.CreateCommand("SELECT NAME, VALUE1 FROM CONSTANTS WHERE TYPE = :Type ORDER BY NAME", conn);
+        using var cmd = SnowflakeDb.CreateCommand("SELECT NAME, VALUE1 FROM PROGRAMINSIGHTS_APP.SECURITY.CONSTANTS WHERE TYPE = :Type ORDER BY NAME", conn);
         SnowflakeDb.AddParam(cmd, "Type", type);
         var dt = SnowflakeDb.Fill(cmd);
         foreach (DataRow row in dt.Rows)
