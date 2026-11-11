@@ -1609,7 +1609,12 @@ else if (program is not null)
     [Inject] private BenchmarkService BenchmarkSvc { get; set; } = default!;
     [Inject] private ITenantContext TenantCtx { get; set; } = default!;
 
-    private readonly string[] tabs = ["Details", "InputData", "Units", "CostRevenue", "Results", "BreakEven", "Compare", "Benchmark", "Intelligence"];
+    private static readonly string[] allTabs = ["Details", "InputData", "Units", "CostRevenue", "Results", "BreakEven", "Compare", "Benchmark", "Intelligence"];
+    // The Preview has no Cortex access, so it never shows the Intelligence tab.
+    private static readonly string[] previewTabs = allTabs.Where(t => t != "Intelligence").ToArray();
+    private bool isPreview;
+    private string[] tabs => isPreview ? previewTabs : allTabs;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
     private ProgramDetailsDto? program;
     private string activeTab = "Details";
     private bool isLoading = true;
@@ -1818,12 +1823,18 @@ else if (program is not null)
         try
         {
             var access = await TenantCtx.GetAsync();
+            if (access.NeedsChoice)
+            {
+                Nav.NavigateTo("/choose-institution");
+                return;
+            }
             if (!access.Ok)
             {
                 loadError = access.Reason;
                 return;
             }
             cortexAvailable = access.Capabilities.Cortex;
+            isPreview = access.Tier == AccessTier.Preview;
 
             program = await ProgramSvc.GetDetailsAsync(ProgramId);
             if (program is null)
@@ -2612,9 +2623,17 @@ else if (program is not null)
 
     private IEnumerable<string> SourceOptions(string field)
     {
-        // "Model" requires live Snowflake data — not available for manual scenarios
+        // "Model" requires live Snowflake data — not available for manual scenarios.
+        // Benchmark does not: it is sector data, which is exactly what a user with no
+        // cost model of their own (a member without a loaded model, or the Preview)
+        // has to work from.
         if (!HasSnowflakeSource)
-            return field == "RevCgs" ? ["Custom", "Cluster"] : ["Custom"];
+            return field switch
+            {
+                "RevCgs" => ["Custom", "Cluster"],
+                "Cph" or "Nfc" => ["Custom", "Benchmark"],
+                _ => ["Custom"]
+            };
         if (field == "RevCgs") return ["Custom", "Cluster", "Model"];
         if (field is "Cph" or "Nfc") return ["Custom", "Model", "Benchmark"];
         return ["Custom", "Model"];

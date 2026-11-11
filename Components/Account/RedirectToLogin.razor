@@ -1,12 +1,21 @@
+@using Microsoft.Extensions.Options
+@using ProgramInsights.Services.Connections
 @inject NavigationManager Nav
+@inject IOptions<PreviewOptions> PreviewOpts
 
 @code {
-    // forceLoad is mandatory: the OIDC challenge is an HTTP 302 and cannot be
-    // performed from inside the SignalR circuit. A normal NavigateTo would try to
-    // route client-side and silently do nothing useful.
+    // forceLoad is mandatory: both sign-ins need a real HTTP request (an OIDC 302, or
+    // the Preview login page setting a cookie) and cannot happen inside the SignalR
+    // circuit. A normal NavigateTo would try to route client-side.
     protected override void OnInitialized()
     {
         var returnUrl = Uri.EscapeDataString(Nav.Uri);
+        if (PreviewOpts.Value.Enabled)
+        {
+            var path = Uri.EscapeDataString(new Uri(Nav.Uri).PathAndQuery);
+            Nav.NavigateTo($"login?ReturnUrl={path}", forceLoad: true);
+            return;
+        }
         Nav.NavigateTo(
             $"MicrosoftIdentity/Account/SignIn?redirectUri={returnUrl}",
             forceLoad: true);

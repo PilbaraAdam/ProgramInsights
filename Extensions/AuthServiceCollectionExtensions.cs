@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.UI;
@@ -18,9 +19,16 @@ namespace ProgramInsights.Extensions;
 /// </summary>
 public static class AuthServiceCollectionExtensions
 {
+    /// <summary>True when this deployment is the Private Preview (Preview:Enabled).</summary>
+    public static bool IsPreviewDeployment(this IConfiguration config) =>
+        config.GetValue<bool>("Preview:Enabled");
+
     public static IServiceCollection AddProgramInsightsAuth(
         this IServiceCollection services, IConfiguration config)
     {
+        if (config.IsPreviewDeployment())
+            return services.AddPreviewAuth(config);
+
         // The scope Snowflake's External OAuth integration expects. "session:role-any"
         // is the Snowflake convention for "let the token's user assume any role they
         // have been granted" — it requires EXTERNAL_OAUTH_ANY_ROLE_MODE = 'ENABLE'
@@ -60,6 +68,33 @@ public static class AuthServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Private Preview sign-in: a cookie issued by the /login page after the email and
+    /// password check in <see cref="PreviewAccountService"/>. No Entra, no MSAL.
+    /// </summary>
+    private static IServiceCollection AddPreviewAuth(this IServiceCollection services, IConfiguration config)
+    {
+        services
+            .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(o =>
+            {
+                o.LoginPath = "/login";
+                o.LogoutPath = "/logout";
+                o.AccessDeniedPath = "/access-denied";
+                o.Cookie.Name = "pi_preview";
+                o.Cookie.HttpOnly = true;
+                o.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                o.Cookie.SameSite = SameSiteMode.Lax;
+                o.ExpireTimeSpan = TimeSpan.FromHours(12);
+                o.SlidingExpiration = true;
+            });
+
+        services.AddAuthorization();
+        services.AddCascadingAuthenticationState();
+        services.AddSingleton<PreviewAccountService>();
+        return services;
+    }
+
+    /// <summary>
     /// Per-user Snowflake connections: token acquisition, role-to-database routing, and
     /// the connection factory the data services depend on.
     /// </summary>
@@ -72,6 +107,14 @@ public static class AuthServiceCollectionExtensions
             // Fail at boot on a missing Account/Warehouse/Scope rather than on the
             // first query, when the cause is far less obvious.
             .ValidateOnStart();
+
+        services.AddOptions<PreviewOptions>()
+            .Bind(config.GetSection("Preview"))
+            .Validate(o => { o.Validate(); return true; })
+            .ValidateOnStart();
+
+        // Remembers which institution a multi-membership user picked.
+        services.AddSingleton<InstitutionChoiceStore>();
 
         // Shared by the tenant resolver's cache.
         services.AddMemoryCache();
@@ -88,7 +131,10 @@ public static class AuthServiceCollectionExtensions
         services.AddSingleton<ITenantResolver, TenantResolver>();
 
         // Scoped == per circuit.
-        services.AddScoped<ISnowflakeTokenProvider, EntraSnowflakeTokenProvider>();
+        if (config.IsPreviewDeployment())
+            services.AddScoped<ISnowflakeTokenProvider, PreviewSnowflakeTokenProvider>();
+        else
+            services.AddScoped<ISnowflakeTokenProvider, EntraSnowflakeTokenProvider>();
         services.AddScoped<ITenantContext, TenantContext>();
         services.AddScoped<ISnowflakeConnectionFactory, SnowflakeConnectionFactory>();
 

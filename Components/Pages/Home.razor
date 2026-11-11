@@ -413,14 +413,17 @@
                         <span class="source-option-desc">Greenfield — enter all values manually</span>
                     </div>
                 </button>
-                <button type="button" class="source-option-card @(scenarioUseSnowflake ? "active" : "")"
-                        @onclick='() => scenarioUseSnowflake = true'>
-                    <i class="fa-solid fa-database"></i>
-                    <div class="source-option-body">
-                        <span class="source-option-title">Snowflake Database</span>
-                        <span class="source-option-desc">Map from existing financial data</span>
-                    </div>
-                </button>
+                @if (CanUseSnowflakeSource)
+                {
+                    <button type="button" class="source-option-card @(scenarioUseSnowflake ? "active" : "")"
+                            @onclick='UseSnowflakeSource'>
+                        <i class="fa-solid fa-database"></i>
+                        <div class="source-option-body">
+                            <span class="source-option-title">@(memberModelDb is null ? "Snowflake Database" : "Your Institution's Model")</span>
+                            <span class="source-option-desc">Map from existing financial data</span>
+                        </div>
+                    </button>
+                }
             </div>
         </div>
 
@@ -431,7 +434,8 @@
                 <div class="rightColumnPopout">
                     <div style="display:flex;gap:6px;">
                         <input type="text" class="textBoxStyle4" @bind="scenarioSourceDb"
-                               placeholder="e.g. DEMO_CSA_INU" style="flex:1;min-width:0;" />
+                               placeholder="e.g. DEMO_CSA_INU" style="flex:1;min-width:0;"
+                               readonly="@(memberModelDb is not null)" />
                         <button type="button" class="button2" @onclick="ConnectSourceDb"
                                 disabled="@(isConnecting || string.IsNullOrWhiteSpace(scenarioSourceDb))">
                             @if (isConnecting)
@@ -543,6 +547,20 @@
     [Inject] private ITenantContext TenantCtx { get; set; } = default!;
     [Inject] private NavigationManager Nav { get; set; } = default!;
 
+    // Tier-dependent data source. Clients type any database their role can reach;
+    // members are fixed to their institution's loaded model (and get no Snowflake
+    // option until one is loaded); the Preview has no data source at all.
+    private AccessTier tier = AccessTier.Client;
+    private string? memberModelDb;
+    private bool CanUseSnowflakeSource =>
+        tier == AccessTier.Client || (tier == AccessTier.Member && memberModelDb is not null);
+
+    private void UseSnowflakeSource()
+    {
+        scenarioUseSnowflake = true;
+        if (memberModelDb is not null) scenarioSourceDb = memberModelDb;
+    }
+
     // ── State ──────────────────────────────────────────────────────
     private string activeTab = "Guide";
     private Guid? selectedScenarioId;
@@ -588,12 +606,19 @@
         try
         {
             var access = await TenantCtx.GetAsync();
+            if (access.NeedsChoice)
+            {
+                Nav.NavigateTo("/choose-institution");
+                return;
+            }
             if (!access.Ok)
             {
                 loadError = access.Reason;
                 isLoadingScenarios = false;
                 return;
             }
+            tier = access.Tier;
+            memberModelDb = access.Tier == AccessTier.Member ? access.ModelSourceDatabase : null;
             var tenantId = access.TenantId;
             scenarios = await ScenarioSvc.GetAllAsync(tenantId);
         }

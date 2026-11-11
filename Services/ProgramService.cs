@@ -1,5 +1,6 @@
 using ProgramInsights.Models;
 using ProgramInsights.Services.Connections;
+using ProgramInsights.Services.Tenancy;
 using Snowflake.Data.Client;
 using System.Data;
 
@@ -8,16 +9,19 @@ namespace ProgramInsights.Services;
 public class ProgramService
 {
     private readonly ISnowflakeConnectionFactory _db;
+    private readonly ITenantContext _tenant;
     private readonly ILogger<ProgramService> _log;
 
-    public ProgramService(ISnowflakeConnectionFactory db, ILogger<ProgramService> log)
+    public ProgramService(ISnowflakeConnectionFactory db, ITenantContext tenant, ILogger<ProgramService> log)
     {
         _db = db;
+        _tenant = tenant;
         _log = log;
     }
 
     public async Task<ProgramDetailsDto?> GetDetailsAsync(Guid programId, CancellationToken ct = default)
     {
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
@@ -35,12 +39,13 @@ public class ProgramService
                 "COALESCE(p.BM_FOE, '') AS BM_FOE, " +
                 "COALESCE(p.BM_PERIOD_NAME, '') AS BM_PERIOD_NAME, " +
                 "m.NAME AS MODEL_NAME, m.ACE_MODEL, m.SAVE_DATE AS MODEL_SAVE_DATE, m.ACE_DBNAME " +
-                "FROM PROGRAM p LEFT JOIN MODEL m ON p.MODEL_ID = m.MODEL_ID " +
-                "WHERE p.PROGRAM_ID = :ProgramID";
+                "FROM PROGRAM p JOIN MODEL m ON p.MODEL_ID = m.MODEL_ID " +
+                "WHERE p.PROGRAM_ID = :ProgramID AND m.TENANT = :Tenant";
 
             using (var cmd = SnowflakeDb.CreateCommand(programSql, conn))
             {
                 SnowflakeDb.AddParam(cmd, "ProgramID", programId.ToString());
+                SnowflakeDb.AddParam(cmd, "Tenant", owner.TenantId.ToString());
                 var dt = SnowflakeDb.Fill(cmd);
                 if (dt.Rows.Count == 0) return null;
 
@@ -108,9 +113,11 @@ public class ProgramService
 
     public async Task<List<ProgramDto>> GetByScenarioAsync(Guid scenarioId, CancellationToken ct = default)
     {
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
+            owner.EnsureScenario(conn, scenarioId);
             var result = new List<ProgramDto>();
 
             const string sql = @"
@@ -160,9 +167,11 @@ public class ProgramService
 
     public async Task<Guid> CreateAsync(Guid scenarioId, string name, string description, int startYear, int numberOfYears, CancellationToken ct = default)
     {
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
+            owner.EnsureScenario(conn, scenarioId);
             var programId = Guid.NewGuid();
 
             string profileName = "Standard";
@@ -184,14 +193,15 @@ public class ProgramService
                     throw new InvalidOperationException("A program with this name already exists in this scenario.");
             }
 
-            const string insertSql =
+            var insertSql =
                 "INSERT INTO PROGRAM (MODEL_ID, PROGRAM_ID, NAME, REVCGS_CLUSTER, REVCGS_SELECT, REVCGS_CUSTOM, " +
                 "REVDOM_SELECT, REVDOM_CUSTOM, REVINT_SELECT, REVINT_CUSTOM, CPH_SELECT, CPH_CUSTOM, " +
-                "NFC_SELECT, NFC_CUSTOM, PROFILE, SAVE_DATE, DESCRIPTION, SCHOOL_SELECT, CAREER_SELECT, START_YEAR) " +
+                $"NFC_SELECT, NFC_CUSTOM, PROFILE, SAVE_DATE, DESCRIPTION, SCHOOL_SELECT, CAREER_SELECT, START_YEAR{owner.Col}) " +
                 "VALUES (:Model_ID, :Program_ID, :Name, 'Cluster 1', 'Custom', 0, 'Custom', 0, 'Custom', 0, " +
-                "'Custom', 0, 'Custom', 0, :Profile, CURRENT_TIMESTAMP(), :Description, '', '', :Start_Year)";
+                $"'Custom', 0, 'Custom', 0, :Profile, CURRENT_TIMESTAMP(), :Description, '', '', :Start_Year{owner.Val})";
             using (var cmd = SnowflakeDb.CreateCommand(insertSql, conn))
             {
+                owner.Bind(cmd);
                 SnowflakeDb.AddParam(cmd, "Model_ID", scenarioId.ToString());
                 SnowflakeDb.AddParam(cmd, "Program_ID", programId.ToString());
                 SnowflakeDb.AddParam(cmd, "Name", name);
@@ -201,12 +211,13 @@ public class ProgramService
                 cmd.ExecuteNonQuery();
             }
 
-            const string settingsSql =
-                "INSERT INTO PROGRAM_SETTINGS (PROGRAM_ID, YEAR, EFTSL_CGS, EFTSL_DOM, EFTSL_INT, FIXED_EXP, CPI, CPI_EXP) " +
-                "VALUES (:Program_ID, :Year, 0, 0, 0, 0, 0, 0)";
+            var settingsSql =
+                $"INSERT INTO PROGRAM_SETTINGS (PROGRAM_ID, YEAR, EFTSL_CGS, EFTSL_DOM, EFTSL_INT, FIXED_EXP, CPI, CPI_EXP{owner.Col}) " +
+                $"VALUES (:Program_ID, :Year, 0, 0, 0, 0, 0, 0{owner.Val})";
             for (int i = 0; i < numberOfYears; i++)
             {
                 using var cmd = SnowflakeDb.CreateCommand(settingsSql, conn);
+                owner.Bind(cmd);
                 SnowflakeDb.AddParam(cmd, "Program_ID", programId.ToString());
                 SnowflakeDb.AddParam(cmd, "Year", i);
                 cmd.ExecuteNonQuery();
@@ -218,9 +229,12 @@ public class ProgramService
 
     public async Task DeleteAsync(Guid scenarioId, Guid programId, CancellationToken ct = default)
     {
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
+            owner.EnsureScenario(conn, scenarioId);
+            owner.EnsureProgram(conn, programId);
             using (var cmd = SnowflakeDb.CreateCommand(
                 "DELETE FROM PROGRAM WHERE MODEL_ID = :Model AND PROGRAM_ID = :ProgramID", conn))
             {
@@ -241,9 +255,15 @@ public class ProgramService
     {
         if (string.IsNullOrWhiteSpace(details.Name)) throw new InvalidOperationException("Program name is required.");
 
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
+            // Both: the program must be ours, and so must the scenario it is filed
+            // under (the MODEL_ID written to UNITS below).
+            owner.EnsureProgram(conn, details.Id);
+            owner.EnsureScenario(conn, details.ScenarioId);
+
             const string updateSql =
                 "UPDATE PROGRAM SET NAME = :Name, DESCRIPTION = :Description, START_YEAR = :StartYear, " +
                 "REVCGS_CLUSTER = :RevCgsCluster, REVCGS_SELECT = :RevCgsSelect, REVCGS_CUSTOM = :RevCgsCustom, " +
@@ -288,9 +308,9 @@ public class ProgramService
             }
 
             Execute(conn, "DELETE FROM PROGRAM_SETTINGS WHERE PROGRAM_ID = :ProgramID", ("ProgramID", details.Id.ToString()));
-            const string settingSql =
-                "INSERT INTO PROGRAM_SETTINGS (PROGRAM_ID, YEAR, EFTSL_CGS, EFTSL_DOM, EFTSL_INT, FIXED_EXP, CPI, CPI_EXP) " +
-                "VALUES (:ProgramID, :Year, :Cgs, :Dom, :Int, :Fixed, :Cpi, :CpiExp)";
+            var settingSql =
+                $"INSERT INTO PROGRAM_SETTINGS (PROGRAM_ID, YEAR, EFTSL_CGS, EFTSL_DOM, EFTSL_INT, FIXED_EXP, CPI, CPI_EXP{owner.Col}) " +
+                $"VALUES (:ProgramID, :Year, :Cgs, :Dom, :Int, :Fixed, :Cpi, :CpiExp{owner.Val})";
             for (var i = 0; i < details.Settings.Count; i++)
             {
                 var setting = details.Settings[i];
@@ -304,17 +324,18 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "Fixed", setting.FixedExpense);
                 SnowflakeDb.AddParam(cmd, "Cpi", setting.RevenueCpi);
                 SnowflakeDb.AddParam(cmd, "CpiExp", setting.ExpenseCpi);
+                owner.Bind(cmd);
                 cmd.ExecuteNonQuery();
             }
 
             Execute(conn, "DELETE FROM UNITS WHERE PROGRAM_ID = :ProgramID", ("ProgramID", details.Id.ToString()));
-            const string unitSql =
+            var unitSql =
                 "INSERT INTO UNITS (PROGRAM_ID, UNIT, PROFILE, MODEL_ID, PROGRAM_YEAR, " +
                 "CUSTOM_TUT_SIZE, CUSTOM_LECT_HOURS, CUSTOM_TUT_HOURS, CUSTOM_PREP_HOURS, CUSTOM_ADMIN_HOURS, CUSTOM_STUDENT_HOURS, " +
-                "FOE_CODE_DETAILED) " +
+                $"FOE_CODE_DETAILED{owner.Col}) " +
                 "VALUES (:ProgramID, :Unit, :Profile, :ModelID, :ProgramYear, " +
                 ":CustomTutSize, :CustomLectHours, :CustomTutHours, :CustomPrepHours, :CustomAdminHours, :CustomStudentHours, " +
-                ":FoeCodeDetailed)";
+                $":FoeCodeDetailed{owner.Val})";
             foreach (var unit in details.Units.Where(u => !string.IsNullOrWhiteSpace(u.Unit) && !string.IsNullOrWhiteSpace(u.Profile)))
             {
                 using var cmd = SnowflakeDb.CreateCommand(unitSql, conn);
@@ -330,6 +351,7 @@ public class ProgramService
                 SnowflakeDb.AddParam(cmd, "CustomPrepHours", (object?)unit.CustomPrepHours ?? DBNull.Value);
                 SnowflakeDb.AddParam(cmd, "CustomAdminHours", (object?)unit.CustomAdminHours ?? DBNull.Value);
                 SnowflakeDb.AddParam(cmd, "CustomStudentHours", (object?)unit.CustomStudentHours ?? DBNull.Value);
+                owner.Bind(cmd);
                 cmd.ExecuteNonQuery();
             }
         }, ct);
@@ -593,7 +615,7 @@ public class ProgramService
 
     public async Task<List<FoeCodeOptionDto>> GetFoeCodeOptionsForYearAsync(int year, CancellationToken ct = default)
     {
-        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Shared, ct);
         return await Task.Run(() =>
         {
             return GetFoeCodeOptions(conn, year);

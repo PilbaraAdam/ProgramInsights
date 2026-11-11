@@ -4,15 +4,23 @@ namespace ProgramInsights.Services.Connections;
 public enum SnowflakeScope
 {
     /// <summary>
-    /// The control plane (PROGRAMINSIGHTS_APP.SECURITY). Used for the login-time
-    /// tenant lookup — which has to happen before the client database is known — and
-    /// for global reference data such as CONSTANTS.
+    /// The control plane (PROGRAMINSIGHTS_APP.SECURITY). Used for global reference
+    /// data such as CONSTANTS. (The login-time lookup opens its own connections.)
     /// </summary>
     Control,
 
     /// <summary>
-    /// The signed-in user's client database, resolved from their Snowflake role.
-    /// Everything the app reads or writes about programs and scenarios uses this.
+    /// Where the signed-in user's saved work lives: their client database for clients,
+    /// PROGRAMINSIGHTS_APP.WORKSPACE for members, PROGRAMINSIGHTS_APP.PREVIEW for the
+    /// Preview. App queries name these tables unqualified, so the same SQL works for
+    /// every tier.
     /// </summary>
-    Tenant
+    Tenant,
+
+    /// <summary>
+    /// No default database: for fully-qualified reads of shared data (benchmarks,
+    /// HELP allocations, Cortex). Works for every tier, including users with no
+    /// client database.
+    /// </summary>
+    Shared
 }

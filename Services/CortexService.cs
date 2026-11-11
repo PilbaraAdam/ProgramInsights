@@ -23,7 +23,7 @@ public class CortexService
         string model = "mistral-large2",
         CancellationToken ct = default)
     {
-        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Shared, ct);
         return await Task.Run(() =>
         {
             var prompt = BuildPrompt(program, result);

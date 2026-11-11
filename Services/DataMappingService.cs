@@ -1,5 +1,6 @@
 using ProgramInsights.Models;
 using ProgramInsights.Services.Connections;
+using ProgramInsights.Services.Tenancy;
 using Snowflake.Data.Client;
 
 namespace ProgramInsights.Services;
@@ -7,11 +8,13 @@ namespace ProgramInsights.Services;
 public class DataMappingService
 {
     private readonly ISnowflakeConnectionFactory _db;
+    private readonly ITenantContext _tenant;
     private readonly ILogger<DataMappingService> _log;
 
-    public DataMappingService(ISnowflakeConnectionFactory db, ILogger<DataMappingService> log)
+    public DataMappingService(ISnowflakeConnectionFactory db, ITenantContext tenant, ILogger<DataMappingService> log)
     {
         _db = db;
+        _tenant = tenant;
         _log = log;
     }
 
@@ -59,9 +62,11 @@ public class DataMappingService
 
     public async Task<ModelConfigDto> LoadConfigAsync(Guid scenarioId, CancellationToken ct = default)
     {
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
+            owner.EnsureScenario(conn, scenarioId);
             var dto = new ModelConfigDto { ModelId = scenarioId.ToString() };
             using var cmd = SnowflakeDb.CreateCommand(
                 "SELECT * FROM MODEL_CONFIG WHERE MODEL_ID = :mid LIMIT 1", conn);
@@ -107,17 +112,38 @@ public class DataMappingService
 
     public async Task SaveConfigAsync(ModelConfigDto dto, Guid tenantId, CancellationToken ct = default)
     {
+        var access = await _tenant.GetAsync(ct);
+        switch (access.Tier)
+        {
+            case AccessTier.Preview:
+                throw new Auth.SnowflakeAccessDeniedException("The Preview has no data connection.");
+            case AccessTier.Member when !string.Equals(
+                dto.SourceDatabase?.Trim(), access.ModelSourceDatabase, StringComparison.OrdinalIgnoreCase):
+                // Members connect only to their own institution's loaded model.
+                throw new Auth.SnowflakeAccessDeniedException(access.ModelSourceDatabase is null
+                    ? "Your institution's model has not been loaded into Snowflake yet."
+                    : $"Your institution's model is in {access.ModelSourceDatabase}.");
+        }
+
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
+        if (owner.TenantId != tenantId)
+            throw new Auth.SnowflakeAccessDeniedException("That scenario was not found.");
+
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         await Task.Run(() =>
         {
+            owner.EnsureScenario(conn, Guid.Parse(dto.ModelId));
+
             if (string.IsNullOrEmpty(dto.ConfigId))
                 dto.ConfigId = Guid.NewGuid().ToString();
 
             // Only the connection + filter fields are required for the normalised view approach.
             // Legacy column-mapping columns are preserved in the table but not written here.
-            const string sql = @"
-                MERGE INTO MODEL_CONFIG t USING (SELECT :cfg_id AS CONFIG_ID) s
-                    ON t.CONFIG_ID = s.CONFIG_ID
+            // Matched on MODEL_ID too, so a CONFIG_ID that belongs to another scenario
+            // can never be updated through this one.
+            var sql = $@"
+                MERGE INTO MODEL_CONFIG t USING (SELECT :cfg_id AS CONFIG_ID, :model_id AS MODEL_ID) s
+                    ON t.CONFIG_ID = s.CONFIG_ID AND t.MODEL_ID = s.MODEL_ID
                 WHEN MATCHED THEN UPDATE SET
                     SOURCE_DATABASE = :src_db,
                     SOURCE_SCHEMA   = :src_schema,
@@ -127,11 +153,11 @@ public class DataMappingService
                 WHEN NOT MATCHED THEN INSERT (
                     CONFIG_ID, MODEL_ID, TENANT_ID,
                     SOURCE_DATABASE, SOURCE_SCHEMA,
-                    MODEL_FILTER, PERIOD_FILTER
+                    MODEL_FILTER, PERIOD_FILTER{owner.Col}
                 ) VALUES (
                     :cfg_id, :model_id, :tenant_id,
                     :src_db, :src_schema,
-                    :model_flt, :period_flt
+                    :model_flt, :period_flt{owner.Val}
                 )";
 
             using var cmd = SnowflakeDb.CreateCommand(sql, conn);
@@ -142,6 +168,7 @@ public class DataMappingService
             SnowflakeDb.AddParam(cmd, "src_schema", dto.SourceSchema);
             SnowflakeDb.AddParam(cmd, "model_flt", dto.ModelFilter);
             SnowflakeDb.AddParam(cmd, "period_flt", dto.PeriodFilter);
+            owner.Bind(cmd);
             cmd.ExecuteNonQuery();
         }, ct);
     }
@@ -279,13 +306,15 @@ public class DataMappingService
     /// </summary>
     public async Task<string> RegisterModelAsync(string modelId, string modelFilter, CancellationToken ct = default)
     {
+        var owner = await _tenant.GetOwnerScopeAsync(ct);
         await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
         return await Task.Run(() =>
         {
             try
             {
                 using var cmd = SnowflakeDb.CreateCommand(
-                    "UPDATE MODEL SET SAVE_DATE = CURRENT_TIMESTAMP(), ACE_MODEL = :model_flt WHERE MODEL_ID = :mid", conn);
+                    "UPDATE MODEL SET SAVE_DATE = CURRENT_TIMESTAMP(), ACE_MODEL = :model_flt WHERE MODEL_ID = :mid AND TENANT = :tenant", conn);
+                SnowflakeDb.AddParam(cmd, "tenant", owner.TenantId.ToString());
                 SnowflakeDb.AddParam(cmd, "model_flt", modelFilter);
                 SnowflakeDb.AddParam(cmd, "mid", modelId);
                 cmd.ExecuteNonQuery();

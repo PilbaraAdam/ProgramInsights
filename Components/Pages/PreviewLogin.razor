@@ -1,0 +1,110 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Microsoft.Extensions.Options
+@using ProgramInsights.Services.Auth
+@using ProgramInsights.Services.Connections
+@inject IOptions<PreviewOptions> PreviewOpts
+@inject IServiceProvider Services
+@inject NavigationManager Nav
+
+@* Static server rendering (no @rendermode): the sign-in has to set a cookie, which
+   needs the HTTP response, not a SignalR circuit. *@
+
+<PageTitle>Sign in — Program Insights Preview</PageTitle>
+
+<div class="content-container">
+    <div class="wizard-header">
+        <h1 class="wizard-title">Program Insights — Private Preview</h1>
+        <p class="wizard-subtitle">Sign in with the email address and password you were sent.</p>
+    </div>
+
+    <div class="details-card" style="max-width:420px;">
+        @if (!PreviewOpts.Value.Enabled)
+        {
+            <p style="font-size:13px;color:#374151;">This deployment uses single sign-on.</p>
+            <a class="button1" href="MicrosoftIdentity/Account/SignIn">
+                <i class="fa-solid fa-right-to-bracket me-2"></i>Sign in
+            </a>
+        }
+        else
+        {
+            @if (failed)
+            {
+                <div class="mapping-error" style="margin-bottom:12px;">Incorrect email or password.</div>
+            }
+            <EditForm Model="Input" FormName="preview-login" OnValidSubmit="SignInAsync">
+                <div class="aboutRow">
+                    <div class="leftColumnPopout">Email</div>
+                    <div class="rightColumnPopout">
+                        <InputText @bind-Value="Input.Email" class="textBoxStyle4" type="email" autocomplete="username" />
+                    </div>
+                </div>
+                <div class="aboutRow" style="margin-top:10px;">
+                    <div class="leftColumnPopout">Password</div>
+                    <div class="rightColumnPopout">
+                        <InputText @bind-Value="Input.Password" class="textBoxStyle4" type="password" autocomplete="current-password" />
+                    </div>
+                </div>
+                <div class="tab-footer-actions" style="margin-top:16px;">
+                    <button type="submit" class="button1">
+                        <i class="fa-solid fa-right-to-bracket me-2"></i>Sign in
+                    </button>
+                </div>
+            </EditForm>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private LoginInput Input { get; set; } = new();
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+
+    private bool failed;
+
+    private async Task SignInAsync()
+    {
+        if (!PreviewOpts.Value.Enabled) return;
+
+        // Resolved here rather than injected: it is only registered on Preview deployments.
+        var accounts = Services.GetRequiredService<PreviewAccountService>();
+        var identity = await accounts.VerifyAsync(
+            Input.Email, Input.Password, HttpContext.Connection.RemoteIpAddress?.ToString());
+
+        if (identity is null)
+        {
+            // One message for every failure, so the form cannot reveal who has access.
+            failed = true;
+            Input.Password = "";
+            return;
+        }
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Email, identity.Email),
+            new(ClaimTypes.Name, identity.Email),
+            new("name", identity.Name),
+            new("preview", "true"),
+        };
+        if (!string.IsNullOrWhiteSpace(identity.Org)) claims.Add(new("org", identity.Org));
+
+        await HttpContext.SignInAsync(
+            CookieAuthenticationDefaults.AuthenticationScheme,
+            new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
+
+        // Local paths only: an absolute ReturnUrl would make this an open redirect.
+        var target = !string.IsNullOrEmpty(ReturnUrl) && ReturnUrl.StartsWith('/') && !ReturnUrl.StartsWith("//")
+            ? ReturnUrl
+            : "/";
+        Nav.NavigateTo(target, forceLoad: true);
+    }
+
+    private sealed class LoginInput
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+}

@@ -34,17 +34,26 @@ internal sealed class SnowflakeConnectionFactory : ISnowflakeConnectionFactory
     public async Task<SnowflakeDbConnection> OpenAsync(
         SnowflakeScope scope = SnowflakeScope.Tenant, CancellationToken ct = default)
     {
+        // Resolution first, for every scope: it decides which role the session runs as,
+        // and a user who is not entitled (or has not picked an institution) gets no
+        // connection at all.
+        var resolution = await _tenant.GetAsync(ct);
+        if (!resolution.Ok)
+            throw new SnowflakeAccessDeniedException(resolution.Reason ?? "You do not have access to Program Insights.");
+
         var (database, schema) = scope switch
         {
             SnowflakeScope.Control => (_opts.ControlDatabase, _opts.ControlSchema),
-            _ => (await _tenant.GetDatabaseAsync(ct), _opts.DefaultSchema),
+            SnowflakeScope.Shared => ((string?)null, (string?)null),
+            _ => (await _tenant.GetDatabaseAsync(ct), resolution.SchemaName ?? _opts.DefaultSchema),
         };
+        var role = resolution.ConnectRole;
 
         var cred = await _tokens.GetAsync(ct: ct);
 
         try
         {
-            return await _opener.OpenAsync(cred, database, schema, ct);
+            return await _opener.OpenAsync(cred, database, schema, ct, role);
         }
         catch (SnowflakeDbException ex) when (SnowflakeSessionOpener.IsOAuthTokenRejected(ex))
         {
@@ -54,7 +63,7 @@ internal sealed class SnowflakeConnectionFactory : ISnowflakeConnectionFactory
             var fresh = await _tokens.GetAsync(forceRefresh: true, ct: ct);
             try
             {
-                return await _opener.OpenAsync(fresh, database, schema, ct);
+                return await _opener.OpenAsync(fresh, database, schema, ct, role);
             }
             catch (SnowflakeDbException ex2) when (SnowflakeSessionOpener.IsOAuthTokenRejected(ex2))
             {

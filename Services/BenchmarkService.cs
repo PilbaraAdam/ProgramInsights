@@ -35,7 +35,7 @@ public class BenchmarkService
     /// </summary>
     public async Task<BenchmarkFilterOptionsDto> GetFilterOptionsAsync(CancellationToken ct = default)
     {
-        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Shared, ct);
         return await Task.Run(() =>
         {
             var result = new BenchmarkFilterOptionsDto();
@@ -60,7 +60,7 @@ public class BenchmarkService
     public async Task<List<BenchmarkMeasureDto>> GetMeasuresAsync(
         string degreeLevel, string foe, string periodName, CancellationToken ct = default)
     {
-        await using var conn = await _db.OpenAsync(SnowflakeScope.Tenant, ct);
+        await using var conn = await _db.OpenAsync(SnowflakeScope.Shared, ct);
         return await Task.Run(() =>
         {
             var result = new List<BenchmarkMeasureDto>();

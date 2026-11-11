@@ -98,8 +98,13 @@
                 <tbody>
                     <tr><td style="width:220px;font-weight:600;">Status</td>
                         <td>@(resolution.Ok ? "OK" : $"DENIED — {resolution.Reason}")</td></tr>
+                    <tr><td style="font-weight:600;">Access tier</td><td>@(resolution.NeedsChoice ? "Member — institution not chosen yet" : resolution.Tier.ToString())</td></tr>
                     <tr><td style="font-weight:600;">Snowflake role</td><td>@(resolution.Role ?? "—")</td></tr>
-                    <tr><td style="font-weight:600;">Client database</td><td>@(resolution.DatabaseName ?? "—")</td></tr>
+                    <tr><td style="font-weight:600;">Connects as role</td><td>@(resolution.ConnectRole ?? "(default role)")</td></tr>
+                    <tr><td style="font-weight:600;">Saved work in</td><td>@(resolution.DatabaseName is null ? "—" : $"{resolution.DatabaseName}.{resolution.SchemaName}")</td></tr>
+                    <tr><td style="font-weight:600;">Institution key</td><td>@(resolution.ModelKey ?? "—")</td></tr>
+                    <tr><td style="font-weight:600;">Model database</td><td>@(resolution.ModelSourceDatabase is null ? "—" : $"{resolution.ModelSourceDatabase}.{resolution.ModelSourceSchema}")</td></tr>
+                    <tr><td style="font-weight:600;">Memberships</td><td>@(resolution.Memberships.Count == 0 ? "—" : string.Join(", ", resolution.Memberships.Select(m => $"{m.Institution} ({m.Role})")))</td></tr>
                     <tr><td style="font-weight:600;">Client name</td><td>@(resolution.ClientName ?? "—")</td></tr>
                     <tr><td style="font-weight:600;">Tenant id</td><td>@resolution.TenantId</td></tr>
                     <tr><td style="font-weight:600;">Benchmarks</td><td>@Yn(resolution.Capabilities.Benchmarks)</td></tr>

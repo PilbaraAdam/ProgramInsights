@@ -24,6 +24,12 @@ public sealed class SnowflakeOptions
     /// <summary>Schema used inside each client database.</summary>
     [Required] public string DefaultSchema { get; set; } = "PUBLIC";
 
+    /// <summary>Schema in <see cref="ControlDatabase"/> holding members' saved work (SQL/Control/08).</summary>
+    [Required] public string WorkspaceSchema { get; set; } = "WORKSPACE";
+
+    /// <summary>Schema in <see cref="ControlDatabase"/> holding Preview users' saved work (SQL/Control/09).</summary>
+    [Required] public string PreviewSchema { get; set; } = "PREVIEW";
+
     /// <summary>e.g. api://&lt;clientId&gt;/session:role-any</summary>
     [Required] public string Scope { get; set; } = "";
 

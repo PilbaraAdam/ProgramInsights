@@ -12,16 +12,40 @@ internal sealed class TenantContext : ITenantContext
 {
     private readonly ISnowflakeTokenProvider _tokens;
     private readonly ITenantResolver _resolver;
+    private readonly InstitutionChoiceStore _choices;
 
     // Guards against several components resolving concurrently on first render —
     // ProgramView kicks off benchmark loads in parallel with its main load.
     private readonly SemaphoreSlim _gate = new(1, 1);
     private TenantResolution? _resolution;
 
-    public TenantContext(ISnowflakeTokenProvider tokens, ITenantResolver resolver)
+    public TenantContext(ISnowflakeTokenProvider tokens, ITenantResolver resolver, InstitutionChoiceStore choices)
     {
         _tokens = tokens;
         _resolver = resolver;
+        _choices = choices;
+    }
+
+    public async Task<TenantResolution> ChooseInstitutionAsync(string role, CancellationToken ct = default)
+    {
+        var current = await GetAsync(ct);
+        var match = current.Memberships.FirstOrDefault(
+            m => string.Equals(m.Role, role, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+            throw new SnowflakeAccessDeniedException("Choose one of the institutions listed.");
+
+        var cred = await _tokens.GetAsync(ct: ct);
+        _choices.Set(cred.Principal, match.Role);
+        await InvalidateAsync(ct);
+
+        var resolved = await GetAsync(ct);
+        if (!resolved.Ok || !string.Equals(resolved.ConnectRole, match.Role, StringComparison.OrdinalIgnoreCase))
+        {
+            _choices.Clear(cred.Principal);
+            throw new SnowflakeAccessDeniedException(
+                resolved.Reason ?? "Could not sign you in as that institution. Sign in again, or contact Pilbara Group.");
+        }
+        return resolved;
     }
 
     public async Task<TenantResolution> GetAsync(CancellationToken ct = default)
@@ -66,7 +90,7 @@ internal sealed class TenantContext : ITenantContext
     {
         var resolution = await GetAsync(ct);
         if (!resolution.Ok || string.IsNullOrWhiteSpace(resolution.DatabaseName))
-            throw new SnowflakeAccessDeniedException(resolution.Reason ?? "No client database is assigned to your account.");
+            throw new SnowflakeAccessDeniedException(resolution.Reason ?? "No database is assigned to your account.");
         return resolution.DatabaseName!;
     }
 

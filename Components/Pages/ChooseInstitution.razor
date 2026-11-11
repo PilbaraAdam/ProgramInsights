@@ -1,0 +1,101 @@
+@page "/choose-institution"
+@rendermode InteractiveServer
+@using ProgramInsights.Services.Auth
+@using ProgramInsights.Services.Tenancy
+@inject ITenantContext TenantCtx
+@inject NavigationManager Nav
+
+<PageTitle>Choose institution — Program Insights</PageTitle>
+
+<div class="content-container">
+    <div class="wizard-header">
+        <h1 class="wizard-title">Choose an institution</h1>
+        <p class="wizard-subtitle">Your account can work as more than one institution. Pick the one to use for this session — you can switch later from the profile menu.</p>
+    </div>
+
+    <div class="details-card" style="max-width:640px;">
+        @if (isLoading)
+        {
+            <p style="font-size:13px;"><i class="fa-solid fa-spinner fa-spin me-2"></i>Loading your institutions…</p>
+        }
+        else if (choices.Count == 0)
+        {
+            <p style="font-size:13px;color:#374151;">@(message ?? "There are no institutions to choose between.")</p>
+            <div class="tab-footer-actions">
+                <a class="button2" href="/">Back to Program Insights</a>
+            </div>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(error))
+            {
+                <div class="mapping-error" style="margin-bottom:12px;">@error</div>
+            }
+            <div style="display:flex;flex-direction:column;gap:8px;">
+                @foreach (var c in choices)
+                {
+                    var isCurrent = string.Equals(c.Role, currentRole, StringComparison.OrdinalIgnoreCase);
+                    <button type="button" class="source-option-card @(isCurrent ? "active" : "")"
+                            disabled="@isWorking" @onclick="() => Choose(c.Role)">
+                        <i class="fa-solid fa-building-columns"></i>
+                        <div class="source-option-body">
+                            <span class="source-option-title">@c.Institution</span>
+                            <span class="source-option-desc">@(isCurrent ? "Current" : c.Role)</span>
+                        </div>
+                    </button>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private bool isLoading = true;
+    private bool isWorking;
+    private string? error;
+    private string? message;
+    private string? currentRole;
+    private IReadOnlyList<InstitutionChoice> choices = Array.Empty<InstitutionChoice>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var access = await TenantCtx.GetAsync();
+            choices = access.Memberships;
+            currentRole = access.NeedsChoice ? null : access.ConnectRole;
+            if (choices.Count == 0)
+                message = access.Ok
+                    ? "Your account works as a single organisation, so there is nothing to switch."
+                    : access.Reason;
+        }
+        catch (Exception ex) when (ex is SnowflakeAccessDeniedException or SnowflakeAuthExpiredException)
+        {
+            message = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task Choose(string role)
+    {
+        isWorking = true;
+        error = null;
+        try
+        {
+            await TenantCtx.ChooseInstitutionAsync(role);
+            // forceLoad: start a fresh circuit so every component picks up the new tenant.
+            Nav.NavigateTo("/", forceLoad: true);
+        }
+        catch (SnowflakeAccessDeniedException ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            isWorking = false;
+        }
+    }
+}

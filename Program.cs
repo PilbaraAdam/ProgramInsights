@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using ProgramInsights.Components;
 using ProgramInsights.Extensions;
 using ProgramInsights.Services;
@@ -47,8 +49,22 @@ app.UseAntiforgery();
 
 app.MapStaticAssets();
 
-// /MicrosoftIdentity/Account/{SignIn,SignOut,Challenge} from Microsoft.Identity.Web.UI.
-app.MapControllers();
+if (app.Configuration.IsPreviewDeployment())
+{
+    // Preview sign-out. Binding IFormCollection makes the endpoint validate the
+    // antiforgery token the UserMenu form posts, so a third-party page cannot sign
+    // a user out.
+    app.MapPost("/logout", async (HttpContext ctx, IFormCollection _) =>
+    {
+        await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        return Results.Redirect("/login");
+    });
+}
+else
+{
+    // /MicrosoftIdentity/Account/{SignIn,SignOut,Challenge} from Microsoft.Identity.Web.UI.
+    app.MapControllers();
+}
 
 // RequireAuthorization here (rather than as a global fallback policy) means an
 // unauthenticated request for a page gets a real HTTP 302 to Entra before any

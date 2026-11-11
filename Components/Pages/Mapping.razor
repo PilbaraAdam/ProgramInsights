@@ -192,6 +192,7 @@
 
     [Inject] private DataMappingService MappingSvc { get; set; } = default!;
     [Inject] private ITenantContext TenantCtx { get; set; } = default!;
+    [Inject] private NavigationManager Nav { get; set; } = default!;
 
     private static readonly string[] StepLabels = ["Connect", "Filter", "Register"];
 
@@ -329,6 +330,11 @@
         try
         {
             var access = await TenantCtx.GetAsync();
+            if (access.NeedsChoice)
+            {
+                Nav.NavigateTo("/choose-institution");
+                return;
+            }
             if (!access.Ok)
             {
                 workError = access.Reason;

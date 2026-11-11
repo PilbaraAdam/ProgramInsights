@@ -1,4 +1,7 @@
 @using System.Security.Claims
+@using Microsoft.Extensions.Options
+@using ProgramInsights.Services.Connections
+@inject IOptions<PreviewOptions> PreviewOpts
 
 <div class="dropdown">
     <a class="app-nav-icon-link" href="#" data-bs-toggle="dropdown" title="My Profile">
@@ -13,23 +16,42 @@
                 <li><a class="dropdown-item" href="#"><i class="fa-regular fa-user me-2"></i>Not signed in</a></li>
             </NotAuthorized>
         </AuthorizeView>
+        @if (!IsPreview)
+        {
+            <li><a class="dropdown-item" href="/choose-institution"><i class="fa-solid fa-building-columns me-2"></i>Switch institution</a></li>
+        }
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="/about"><i class="fa-solid fa-circle-info me-2"></i>About</a></li>
         <li><a class="dropdown-item" href="/privacy"><i class="fa-solid fa-shield-halved me-2"></i>Privacy policy</a></li>
         <li><hr class="dropdown-divider"></li>
         <AuthorizeView>
             <Authorized>
-                @* Plain href, not @onclick: sign-out must be a real navigation to the
-                   OIDC endpoint so the auth cookie is cleared outside the circuit. *@
-                <li>
-                    <a class="dropdown-item" href="MicrosoftIdentity/Account/SignOut" style="color:#ef4444;">
-                        <i class="fa-solid fa-right-from-bracket me-2"></i>Log Out
-                    </a>
-                </li>
+                @if (IsPreview)
+                {
+                    @* Preview: a POST with an antiforgery token to /logout (Program.cs). *@
+                    <li>
+                        <form method="post" action="logout" style="margin:0;">
+                            <AntiforgeryToken />
+                            <button type="submit" class="dropdown-item" style="color:#ef4444;">
+                                <i class="fa-solid fa-right-from-bracket me-2"></i>Log Out
+                            </button>
+                        </form>
+                    </li>
+                }
+                else
+                {
+                    @* Plain href, not @onclick: sign-out must be a real navigation to the
+                       OIDC endpoint so the auth cookie is cleared outside the circuit. *@
+                    <li>
+                        <a class="dropdown-item" href="MicrosoftIdentity/Account/SignOut" style="color:#ef4444;">
+                            <i class="fa-solid fa-right-from-bracket me-2"></i>Log Out
+                        </a>
+                    </li>
+                }
             </Authorized>
             <NotAuthorized>
                 <li>
-                    <a class="dropdown-item" href="MicrosoftIdentity/Account/SignIn">
+                    <a class="dropdown-item" href="@(IsPreview ? "login" : "MicrosoftIdentity/Account/SignIn")">
                         <i class="fa-solid fa-right-to-bracket me-2"></i>Sign In
                     </a>
                 </li>
@@ -39,6 +61,8 @@
 </div>
 
 @code {
+    private bool IsPreview => PreviewOpts.Value.Enabled;
+
     // Prefer the human-readable name, fall back through the identifiers the Entra
     // token actually carries. Mirrors the principal resolution order used for the
     // Snowflake connection so support sees the same value the database sees.

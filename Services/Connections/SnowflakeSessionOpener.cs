@@ -29,22 +29,45 @@ public sealed class SnowflakeSessionOpener
     /// entirely — useful for diagnosing whether a connection failure is caused by a
     /// missing database or by the OAuth handshake itself.
     /// </param>
+    /// <param name="role">
+    /// Role for the session (<c>role=</c>). Null keeps the user's DEFAULT_ROLE, which is
+    /// how clients connect and what CURRENT_ROLE() reads during client resolution.
+    /// Members connect with their chosen membership role on every connection; setting it
+    /// here rather than with USE ROLE means it cannot silently fall back to the default.
+    /// </param>
     public async Task<SnowflakeDbConnection> OpenAsync(
-        SnowflakeCredential cred, string? database, string? schema, CancellationToken ct = default)
+        SnowflakeCredential cred, string? database, string? schema, CancellationToken ct = default,
+        string? role = null)
     {
         // Build with the builder, never by concatenation: an Entra access token is a
         // 2-8 KB base64url JWT and the builder handles quoting/escaping for us.
         var csb = new SnowflakeDbConnectionStringBuilder
         {
             ["account"] = _opts.Account,
-            ["user"] = cred.Principal,
-            ["authenticator"] = "oauth",
-            ["token"] = cred.AccessToken,
             ["warehouse"] = _opts.Warehouse,
             ["application"] = "ProgramInsights",
             ["poolingEnabled"] = _opts.PoolingEnabled ? "true" : "false",
             ["connection_timeout"] = _opts.ConnectionTimeoutSeconds.ToString(),
         };
+
+        if (cred.IsKeyPair)
+        {
+            // Preview service account. The private key comes from configuration
+            // (Key Vault in deployed environments), never from a user.
+            csb["user"] = cred.ServiceUser!;
+            csb["authenticator"] = "snowflake_jwt";
+            if (!string.IsNullOrEmpty(cred.PrivateKey)) csb["private_key"] = cred.PrivateKey;
+            else csb["private_key_file"] = cred.PrivateKeyPath!;
+            if (!string.IsNullOrEmpty(cred.PrivateKeyPassphrase)) csb["private_key_pwd"] = cred.PrivateKeyPassphrase;
+        }
+        else
+        {
+            csb["user"] = cred.Principal;
+            csb["authenticator"] = "oauth";
+            csb["token"] = cred.AccessToken;
+        }
+
+        if (!string.IsNullOrWhiteSpace(role)) csb["role"] = role;
 
         // Snowflake fails session creation outright if db/schema name a non-existent
         // object, so omitting them isolates the authentication handshake.
@@ -53,9 +76,6 @@ public sealed class SnowflakeSessionOpener
             csb["db"] = database;
             if (!string.IsNullOrWhiteSpace(schema)) csb["schema"] = schema;
         }
-
-        // Note: no `role=`. Omitting it means the user's Snowflake DEFAULT_ROLE applies,
-        // which is exactly what CURRENT_ROLE() reads during tenant resolution.
 
         var conn = new SnowflakeDbConnection { ConnectionString = csb.ConnectionString };
         try
